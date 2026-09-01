@@ -35,6 +35,36 @@
         "mode": { "type": "string" },
         "timestamp": { "type": "string" }
       }
+    },
+    "growth": {
+      "fields": {
+        "id": { "type": "string" },
+        "goal": { "type": "string" },
+        "action": { "type": "string" },
+        "targetFrequency": { "type": "string" },
+        "timeframe": { "type": "string" },
+        "successSignal": { "type": "string" },
+        "status": { "type": "string" },
+        "statusNote": { "type": "string" },
+        "skipCount": { "type": "number" },
+        "completionCount": { "type": "number" },
+        "history": { "type": "array" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "completedAt": { "type": "string" }
+      }
+    },
+    "settings": {
+      "fields": {
+        "enabled": { "type": "boolean" },
+        "reminderTime": { "type": "string" },
+        "frequency": { "type": "string" },
+        "growthGuardianEnabled": { "type": "boolean" },
+        "quietHoursStart": { "type": "string" },
+        "quietHoursEnd": { "type": "string" },
+        "snoozedUntil": { "type": "string" },
+        "lastPromptSentAt": { "type": "string" }
+      }
     }
   }
 }

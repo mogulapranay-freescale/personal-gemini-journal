@@ -4,6 +4,8 @@ import { ReflectionMode, JournalReflection, ChatMessage } from '../types';
 
 interface ReflectionComposerProps {
   currentReflection: JournalReflection | null;
+  initialPromptText?: string;
+  initialCategory?: JournalReflection['category'];
   onSendMessage: (params: {
     prompt: string;
     mode: ReflectionMode;
@@ -17,28 +19,33 @@ interface ReflectionComposerProps {
 
 export const ReflectionComposer: React.FC<ReflectionComposerProps> = ({
   currentReflection,
+  initialPromptText,
+  initialCategory,
   onSendMessage,
   isGenerating,
   error,
   onRetry,
 }) => {
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState(initialPromptText || '');
   const [title, setTitle] = useState(currentReflection?.title || '');
   const [category, setCategory] = useState<JournalReflection['category']>(
-    currentReflection?.category || 'Daily Log'
+    initialCategory || currentReflection?.category || 'Daily Log'
   );
   const [mode, setMode] = useState<ReflectionMode>('reflect');
 
-  // Sync title and category when active reflection changes
+  // Sync title, prompt, and category when active reflection or initial props change
   React.useEffect(() => {
     if (currentReflection) {
       setTitle(currentReflection.title);
       setCategory(currentReflection.category);
     } else {
       setTitle('');
-      setCategory('Daily Log');
+      if (initialCategory) setCategory(initialCategory);
+      else setCategory('Daily Log');
+      if (initialPromptText) setPrompt(initialPromptText);
     }
-  }, [currentReflection?.id]);
+  }, [currentReflection?.id, initialPromptText, initialCategory]);
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

@@ -1,16 +1,17 @@
-# Gemini Reflection Journal — User-Authenticated AI Journaling & Insights
+# Gemini Reflection Journal — User-Authenticated AI Journaling & Growth Guardian
 
-A full-stack, user-authenticated reflection journal and conversational brainstorming partner built on Google Cloud Platform using **Gemini 3.6 Flash**, **Cloud Firestore**, and **Firebase Authentication**.
+A full-stack, user-authenticated reflection journal, conversational brainstorming partner, and intelligent accountability guardian built on Google Cloud Platform using **Gemini 3.6 Flash**, **Cloud Firestore**, and **Firebase Authentication**.
 
 ---
 
 ## 🌟 Architecture & Features
 
 - **Federated Authentication**: Outsources credentials via Firebase Google Sign-In, eliminating storage of plain-text passwords.
-- **Strict User-Isolated Storage**: Every journal entry and message is stored under `/users/{userId}/reflections/{reflectionId}` protected by owner-bound Firestore security rules.
+- **Strict User-Isolated Storage**: Every journal entry, experiment, and preference is stored under `/users/{userId}/...` protected by owner-bound Firestore security rules.
 - **Multi-Turn AI Reflections**: Multi-turn dialogue with Gemini 3.6 Flash with contextual memory, summaries, key takeaways, and brainstormed expansion ideas.
 - **Resilient Fallback Protocol**: Server-side helper with automated fallback across `gemini-3.6-flash`, `gemini-3.1-flash-lite`, `gemini-flash-latest`, and `gemini-3.7-flash` with JSON schema output.
-- **Defensive API Standards**: Express middleware with payload sanitization, zero undefined properties before database ingestion, and graceful error escalation.
+- **Growth Loop & Experiments**: Derives high-level themes, tone trends, comparative shifts, and practical 7-day experiments from real reflections.
+- **Growth Guardian & Smart Accountability**: Detects lost momentum or repeated skips, triggers contextual smart nudges with quick status reporting (`Done`, `Partially Done`, `Skipped`), recommends right-sized plan adaptations (e.g. 15-minute micro-habits), and provides quiet-hours scheduling with temporary snooze.
 
 ---
 
@@ -36,8 +37,23 @@ service cloud.firestore {
         }
       }
 
+      // Growth loop experiment state
+      match /growth/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // User reminder, Growth Guardian, and notification preferences
+      match /settings/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
       // Legacy and direct interaction documents
       match /interactions/{interactionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Catch-all for any user-scoped documents
+      match /{allSubcollections=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
@@ -107,3 +123,21 @@ gcloud run services update gemini-reflection-journal \
 5. **Test Case 5: Entry Deletion & State Cleanup**
    - In the history sidebar, hover over an entry and click the Trash icon.
    - Confirm the entry and its sub-messages are removed and the UI resets smoothly.
+
+6. **Test Case 6: Growth Loop & AI Experiment**
+   - Click "📊 My Growth" in the sidebar.
+   - View "Your Growth Loop", "Current Growth Focus", and "Current Growth Experiment".
+   - Click "Done" or "Partially Done" to report status. Confirm progress is saved in Firestore.
+   - Click "Check In With Journal" and verify the composer is opened with the pre-filled prompt.
+   - Review "What Changed?" and "Weekly Growth Review" synthesis sections.
+
+7. **Test Case 7: Growth Guardian Nudge & Skip Accountability**
+   - If an active experiment exists and no entry has been written today, observe the Growth Guardian banner appear.
+   - Click "Skipped" and provide an optional reason (e.g., "Unexpected deadlines").
+   - Confirm the experiment status and skip counts update in Firestore.
+   - When repeated skips occur, observe the Guardian recommend an adaptive smaller plan (e.g., 15-minute micro-habits). Click "Adopt Smaller Plan".
+
+8. **Test Case 8: Notification Preferences & Quiet Hours**
+   - Click the "Reminders & Guardian" button in the top navigation bar.
+   - Toggle reminders, Growth Guardian accountability, preferred reminder time, frequency, and quiet hours.
+   - Click "Save Preferences". Confirm settings are persisted to Firestore `/users/{userId}/settings/notifications`.

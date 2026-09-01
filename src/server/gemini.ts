@@ -1,10 +1,11 @@
 import { GoogleGenAI, Type, Schema } from '@google/genai';
 
-// Resilient fallback ladder ordered by availability and performance
+// Resilient fallback ladder ordered by availability and latency
 export const FALLBACK_MODELS = [
   'gemini-3.6-flash',
-  'gemini-3.5-flash-lite',
   'gemini-3.1-flash-lite',
+  'gemini-flash-latest',
+  'gemini-3.7-flash',
 ];
 
 let aiClient: GoogleGenAI | null = null;

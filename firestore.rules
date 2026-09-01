@@ -1,24 +1,39 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // User profile document
+    // User profile and all owner-isolated subcollections
     match /users/{userId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
       
-      // Multi-turn reflections/journal entries subcollection
+      // User reflections and messages
       match /reflections/{reflectionId} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
         
-        // Multi-turn chat / message exchange subcollection
         match /messages/{messageId} {
           allow read, write: if request.auth != null && request.auth.uid == userId;
         }
       }
 
-      // Past legacy or direct interaction documents
+      // Growth loop experiments and status tracking
+      match /growth/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Notification settings and reminder preferences
+      match /settings/{docId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Interactions collection
       match /interactions/{interactionId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Comprehensive recursive catch-all for all nested documents under the user
+      match /{document=**} {
         allow read, write: if request.auth != null && request.auth.uid == userId;
       }
     }
   }
 }
+
