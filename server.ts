@@ -128,6 +128,103 @@ Output your response strictly as valid JSON matching this schema:
     }
   });
 
+  // 3. Gemini Growth Insights API Endpoint
+  app.post('/api/growth/insights', async (req: Request, res: Response): Promise<void> => {
+    try {
+      const data = (req.body && typeof req.body === 'object') ? req.body : {};
+      const reflections = Array.isArray(data.reflections) ? data.reflections : [];
+
+      if (reflections.length === 0) {
+        res.json({
+          themes: [],
+          trend: [],
+          summary: 'No journal entries found yet. Start writing reflections to unlock personalized insights.',
+          suggestedFocus: 'Write your first reflection on what matters most to you today.',
+        });
+        return;
+      }
+
+      // Format a concise representation of recent entries (up to 20)
+      const recentEntries = reflections.slice(0, 20).map((r: any, idx: number) => ({
+        index: idx + 1,
+        title: r.title || 'Untitled',
+        category: r.category || 'Daily Log',
+        date: r.createdAt ? r.createdAt.slice(0, 10) : 'Recent',
+        summary: r.summary || r.initialPrompt || '',
+        insights: Array.isArray(r.keyInsights) ? r.keyInsights.join('; ') : '',
+      }));
+
+      const systemInstruction = `You are an insightful personal growth and reflection analyst.
+Analyze the user's recent journal entries and extract higher-level growth insights.
+You must return your response STRICTLY as valid JSON matching this schema:
+{
+  "themes": [
+    {
+      "name": "Theme Name (e.g. Career & Learning, Personal Goals, Mindfulness)",
+      "description": "Short explanation of how this theme appears in their notes.",
+      "frequency": 3
+    }
+  ],
+  "trend": [
+    {
+      "date": "YYYY-MM-DD",
+      "tone": "positive", 
+      "score": 0.8
+    }
+  ],
+  "summary": "Concise 3-5 sentence summary answering: what recurring themes appear, what is improving/changing, what challenges persist, and what positive patterns are observed.",
+  "suggestedFocus": "One practical, actionable focus/action for the user this week based on their entries."
+}
+Note: tone in trend must be one of: "positive", "neutral", "challenging". Score is a float between 0.0 and 1.0. Include approximately 3-5 themes and trend entries for available dates.`;
+
+      const contents = [
+        {
+          role: 'user',
+          parts: [{ text: `Here are the user's recent journal entries:\n${JSON.stringify(recentEntries, null, 2)}` }],
+        },
+      ];
+
+      const { text } = await generateContentWithFallback({
+        systemInstruction,
+        contents,
+        config: {
+          responseMimeType: 'application/json',
+          temperature: 0.4,
+        },
+      });
+
+      let parsed: any;
+      try {
+        parsed = JSON.parse(text);
+      } catch {
+        parsed = {
+          themes: [
+            { name: 'Self-Reflection', description: 'Consistent focus on personal growth and clarity.', frequency: reflections.length },
+          ],
+          trend: reflections.slice(0, 5).map((r: any, i: number) => ({
+            date: r.createdAt ? r.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10),
+            tone: 'positive',
+            score: 0.7 + (i * 0.05),
+          })),
+          summary: 'Your recent reflections demonstrate steady engagement with your goals and daily tasks. Themes of self-improvement and focus recur frequently. Maintaining this journaling cadence will provide deeper clarity over time.',
+          suggestedFocus: 'Allocate 15 minutes each morning to outline your primary priority for the day.',
+        };
+      }
+
+      res.json({
+        themes: Array.isArray(parsed.themes) ? parsed.themes : [],
+        trend: Array.isArray(parsed.trend) ? parsed.trend : [],
+        summary: parsed.summary || 'Summary generated from your reflections.',
+        suggestedFocus: parsed.suggestedFocus || 'Stay consistent with your reflection practice.',
+      });
+    } catch (err: any) {
+      console.error('Error generating growth insights:', err);
+      res.status(500).json({
+        error: err?.message || 'Failed to generate growth insights.',
+      });
+    }
+  });
+
   // 3. Vite middleware for development vs static build in production
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

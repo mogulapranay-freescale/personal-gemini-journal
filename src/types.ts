@@ -34,6 +34,25 @@ export interface JournalReflection {
   messages?: ChatMessage[];
 }
 
+export interface GrowthTheme {
+  name: string;
+  description: string;
+  frequency: number;
+}
+
+export interface GrowthTrendItem {
+  date: string;
+  tone: 'positive' | 'neutral' | 'challenging';
+  score: number;
+}
+
+export interface GrowthInsights {
+  themes: GrowthTheme[];
+  trend: GrowthTrendItem[];
+  summary: string;
+  suggestedFocus: string;
+}
+
 export interface GenerateGeminiRequest {
   prompt: string;
   mode: ReflectionMode;

@@ -1,12 +1,14 @@
 import React from 'react';
 import { JournalReflection } from '../types';
-import { BookOpen, Plus, Trash2, ChevronRight, Sparkles, MessageSquare } from 'lucide-react';
+import { BookOpen, Plus, Trash2, ChevronRight, Sparkles, MessageSquare, BarChart3 } from 'lucide-react';
 
 interface HistorySidebarProps {
   reflections: JournalReflection[];
   activeId: string | null;
+  activeView: 'journal' | 'growth';
   onSelectReflection: (reflection: JournalReflection) => void;
   onNewReflection: () => void;
+  onSelectView: (view: 'journal' | 'growth') => void;
   onDeleteReflection: (id: string, e: React.MouseEvent) => void;
   isLoading: boolean;
 }
@@ -14,27 +16,47 @@ interface HistorySidebarProps {
 export const HistorySidebar: React.FC<HistorySidebarProps> = ({
   reflections,
   activeId,
+  activeView,
   onSelectReflection,
   onNewReflection,
+  onSelectView,
   onDeleteReflection,
   isLoading,
 }) => {
   return (
     <aside id="history-sidebar" className="w-full lg:w-80 flex flex-col bg-slate-900/90 border-r border-slate-800 h-full">
-      {/* Sidebar Header & New Reflection Action */}
-      <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <BookOpen className="w-4 h-4 text-indigo-400" />
-          <h3 className="text-sm font-semibold text-white">Your Past Entries</h3>
-        </div>
+      {/* Navigation Options: Growth Dashboard & New Reflection */}
+      <div className="p-3.5 border-b border-slate-800 space-y-2">
         <button
-          id="btn-new-reflection"
-          onClick={onNewReflection}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-all"
+          id="btn-my-growth"
+          onClick={() => onSelectView('growth')}
+          className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl border text-xs font-medium transition-all ${
+            activeView === 'growth'
+              ? 'bg-violet-950/60 border-violet-500/60 text-violet-200 shadow-md shadow-violet-950/40'
+              : 'bg-slate-800/50 border-slate-700/60 text-slate-200 hover:bg-slate-800 hover:border-slate-600'
+          }`}
         >
-          <Plus className="w-3.5 h-3.5" />
-          New
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-violet-400" />
+            <span>📊 My Growth</span>
+          </div>
+          <ChevronRight className="w-3.5 h-3.5 opacity-70" />
         </button>
+
+        <div className="flex items-center justify-between pt-1 px-1">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-indigo-400" />
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-slate-400">Your Past Entries</h3>
+          </div>
+          <button
+            id="btn-new-reflection"
+            onClick={onNewReflection}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-sm transition-all"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            New
+          </button>
+        </div>
       </div>
 
       {/* List of Entries */}
@@ -50,16 +72,19 @@ export const HistorySidebar: React.FC<HistorySidebarProps> = ({
           <div className="p-6 text-center text-xs text-slate-400">
             <BookOpen className="w-8 h-8 text-slate-600 mx-auto mb-2" />
             <p className="font-medium text-slate-300">No reflections yet</p>
-            <p className="mt-1 text-slate-500">Write your first reflection to receive AI synthesis and brainstorm ideas.</p>
+            <p className="mt-1 text-slate-500">Write your first reflection to receive AI synthesis and growth insights.</p>
           </div>
         )}
 
         {reflections.map((item) => {
-          const isActive = item.id === activeId;
+          const isActive = activeView === 'journal' && item.id === activeId;
           return (
             <div
               key={item.id}
-              onClick={() => onSelectReflection(item)}
+              onClick={() => {
+                onSelectView('journal');
+                onSelectReflection(item);
+              }}
               className={`group relative p-3 rounded-xl border transition-all cursor-pointer ${
                 isActive
                   ? 'bg-indigo-950/50 border-indigo-500/60 shadow-md shadow-indigo-950/40'

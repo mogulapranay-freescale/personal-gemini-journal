@@ -11,6 +11,7 @@ import { JournalReflection, ChatMessage, ReflectionMode } from '../types';
 import { HistorySidebar } from './HistorySidebar';
 import { ReflectionView } from './ReflectionView';
 import { ReflectionComposer } from './ReflectionComposer';
+import { GrowthDashboard } from './GrowthDashboard';
 import {
   Sparkles,
   LogOut,
@@ -18,7 +19,6 @@ import {
   ShieldCheck,
   PanelLeftClose,
   PanelLeftOpen,
-  PlusCircle,
 } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
@@ -31,6 +31,7 @@ export const Dashboard: React.FC = () => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [apiError, setApiError] = useState<string | null>(null);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [activeView, setActiveView] = useState<'journal' | 'growth'>('journal');
 
   // Subscribe to user reflections
   useEffect(() => {
@@ -81,11 +82,13 @@ export const Dashboard: React.FC = () => {
     setSelectedReflection(null);
     setMessages([]);
     setApiError(null);
+    setActiveView('journal');
   };
 
   const handleSelectReflection = (reflection: JournalReflection) => {
     setSelectedReflection(reflection);
     setApiError(null);
+    setActiveView('journal');
   };
 
   const handleDeleteReflection = async (id: string, e: React.MouseEvent) => {
@@ -197,6 +200,7 @@ export const Dashboard: React.FC = () => {
 
       // 4. Update UI active selection
       setSelectedReflection(updatedReflection);
+      setActiveView('journal');
     } catch (err: any) {
       console.error('Error during reflection generation/save:', err);
       setApiError(err?.message || 'Failed to generate reflection with Gemini. Please try again.');
@@ -270,64 +274,76 @@ export const Dashboard: React.FC = () => {
           <HistorySidebar
             reflections={reflections}
             activeId={selectedReflection?.id || null}
+            activeView={activeView}
             onSelectReflection={handleSelectReflection}
             onNewReflection={handleStartNewReflection}
+            onSelectView={(view) => setActiveView(view)}
             onDeleteReflection={handleDeleteReflection}
             isLoading={loadingHistory}
           />
         )}
 
-        {/* Main Conversation & Composer Stage */}
-        <main id="dashboard-stage" className="flex-1 flex flex-col bg-slate-950 overflow-y-auto">
-          <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 flex-1 flex flex-col justify-between">
-            {/* If a reflection is active, show the thread */}
-            {selectedReflection ? (
-              <ReflectionView
-                reflection={selectedReflection}
-                messages={messages}
-                onSelectSuggestion={(text) => {
-                  handleSendMessage({
-                    prompt: text,
-                    mode: 'brainstorm',
-                    title: selectedReflection.title,
-                    category: selectedReflection.category,
-                  });
-                }}
-              />
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-                <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4 shadow-inner">
-                  <Sparkles className="w-7 h-7" />
-                </div>
-                <h3 className="text-xl font-bold text-white">Start a New Reflection</h3>
-                <p className="mt-2 text-sm text-slate-400 max-w-md leading-relaxed">
-                  Reflect on decisions, journal your day, or brainstorm ideas with Gemini 3.6 Flash. All dialogues are saved privately to your Firestore account.
-                </p>
-              </div>
-            )}
-
-            {/* Reflection Composer */}
-            <div className="sticky bottom-0 pt-4 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
-              <ReflectionComposer
-                currentReflection={selectedReflection}
-                onSendMessage={handleSendMessage}
-                isGenerating={isGenerating}
-                error={apiError}
-                onRetry={() => {
-                  if (selectedReflection?.initialPrompt) {
+        {/* Main Conversation & Composer Stage OR Growth Dashboard */}
+        {activeView === 'growth' ? (
+          <main id="dashboard-growth-stage" className="flex-1 flex flex-col bg-slate-950 overflow-y-auto">
+            <GrowthDashboard
+              reflections={reflections}
+              onStartNew={handleStartNewReflection}
+            />
+          </main>
+        ) : (
+          <main id="dashboard-stage" className="flex-1 flex flex-col bg-slate-950 overflow-y-auto">
+            <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 flex-1 flex flex-col justify-between">
+              {/* If a reflection is active, show the thread */}
+              {selectedReflection ? (
+                <ReflectionView
+                  reflection={selectedReflection}
+                  messages={messages}
+                  onSelectSuggestion={(text) => {
                     handleSendMessage({
-                      prompt: selectedReflection.initialPrompt,
-                      mode: 'reflect',
+                      prompt: text,
+                      mode: 'brainstorm',
                       title: selectedReflection.title,
                       category: selectedReflection.category,
                     });
-                  }
-                }}
-              />
+                  }}
+                />
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4 shadow-inner">
+                    <Sparkles className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-bold text-white">Start a New Reflection</h3>
+                  <p className="mt-2 text-sm text-slate-400 max-w-md leading-relaxed">
+                    Reflect on decisions, journal your day, or brainstorm ideas with Gemini. All dialogues are saved privately to your Firestore account.
+                  </p>
+                </div>
+              )}
+
+              {/* Reflection Composer */}
+              <div className="sticky bottom-0 pt-4 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
+                <ReflectionComposer
+                  currentReflection={selectedReflection}
+                  onSendMessage={handleSendMessage}
+                  isGenerating={isGenerating}
+                  error={apiError}
+                  onRetry={() => {
+                    if (selectedReflection?.initialPrompt) {
+                      handleSendMessage({
+                        prompt: selectedReflection.initialPrompt,
+                        mode: 'reflect',
+                        title: selectedReflection.title,
+                        category: selectedReflection.category,
+                      });
+                    }
+                  }}
+                />
+              </div>
             </div>
-          </div>
-        </main>
+          </main>
+        )}
       </div>
     </div>
   );
 };
+
