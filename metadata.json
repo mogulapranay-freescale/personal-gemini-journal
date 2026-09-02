@@ -1,6 +1,6 @@
 {
-  "name": "Gemini Reflection Journal",
-  "description": "User-authenticated multi-turn reflection journal and AI conversational companion powered by Gemini API and Cloud Firestore.",
+  "name": "Gemini Reflection & My Growth",
+  "description": "AI-powered continuous personal growth and reflection journal with intelligent pattern discovery, behavioral experiments, Growth Guardian momentum monitoring, and user-isolated Firestore persistence.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

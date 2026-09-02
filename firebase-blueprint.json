@@ -1,70 +1,122 @@
 {
   "entities": {
-    "users": {
-      "fields": {
-        "uid": { "type": "string" },
-        "email": { "type": "string" },
-        "displayName": { "type": "string" },
-        "photoURL": { "type": "string" },
-        "createdAt": { "type": "string" },
-        "lastActiveAt": { "type": "string" }
-      }
-    },
-    "reflections": {
-      "fields": {
-        "id": { "type": "string" },
+    "Reflection": {
+      "title": "Reflection",
+      "description": "User journal reflection document with AI-generated takeaways and action steps",
+      "type": "object",
+      "properties": {
         "userId": { "type": "string" },
-        "title": { "type": "string" },
-        "category": { "type": "string" },
-        "initialPrompt": { "type": "string" },
-        "summary": { "type": "string" },
-        "brainstormIdeas": { "type": "array" },
-        "keyInsights": { "type": "array" },
-        "turnCount": { "type": "number" },
+        "title": { "type": "string", "maxLength": 200 },
+        "content": { "type": "string", "maxLength": 20000 },
+        "mood": { "type": "string", "maxLength": 50 },
+        "tags": { "type": "array" },
+        "summary": { "type": "string", "maxLength": 5000 },
+        "keyTakeaways": { "type": "array" },
+        "actionSteps": { "type": "array" },
+        "followUpQuestions": { "type": "array" },
+        "chatHistory": { "type": "array" },
         "createdAt": { "type": "string" },
         "updatedAt": { "type": "string" }
-      }
+      },
+      "required": ["userId", "title", "content", "createdAt", "updatedAt"]
     },
-    "messages": {
-      "fields": {
-        "id": { "type": "string" },
-        "reflectionId": { "type": "string" },
+    "Experiment": {
+      "title": "Experiment",
+      "description": "7-day behavioral micro-experiment derived from reflections",
+      "type": "object",
+      "properties": {
         "userId": { "type": "string" },
-        "role": { "type": "string" },
-        "content": { "type": "string" },
-        "mode": { "type": "string" },
-        "timestamp": { "type": "string" }
-      }
-    },
-    "growth": {
-      "fields": {
-        "id": { "type": "string" },
-        "goal": { "type": "string" },
-        "action": { "type": "string" },
-        "targetFrequency": { "type": "string" },
-        "timeframe": { "type": "string" },
-        "successSignal": { "type": "string" },
-        "status": { "type": "string" },
-        "statusNote": { "type": "string" },
-        "skipCount": { "type": "number" },
-        "completionCount": { "type": "number" },
-        "history": { "type": "array" },
+        "title": { "type": "string", "maxLength": 200 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "category": { "type": "string", "maxLength": 50 },
+        "targetDays": { "type": "number" },
+        "completedDays": { "type": "number" },
+        "skippedDays": { "type": "number" },
+        "status": { "type": "string", "maxLength": 50 },
+        "streak": { "type": "number" },
+        "lastCheckInDate": { "type": "string" },
+        "reflectionSourceId": { "type": "string" },
+        "reflectionSourceTitle": { "type": "string" },
+        "adaptationsHistory": { "type": "array" },
         "createdAt": { "type": "string" },
-        "updatedAt": { "type": "string" },
-        "completedAt": { "type": "string" }
-      }
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId", "title", "description", "category", "targetDays", "completedDays", "status", "createdAt", "updatedAt"]
     },
-    "settings": {
-      "fields": {
+    "CheckIn": {
+      "title": "CheckIn",
+      "description": "Daily execution check-in outcome with energy, difficulty and notes",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "experimentId": { "type": "string" },
+        "experimentTitle": { "type": "string", "maxLength": 200 },
+        "date": { "type": "string" },
+        "outcome": { "type": "string", "maxLength": 50 },
+        "energyLevel": { "type": "string", "maxLength": 50 },
+        "difficulty": { "type": "string", "maxLength": 50 },
+        "notes": { "type": "string", "maxLength": 2000 },
+        "feedback": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["userId", "experimentId", "date", "outcome", "energyLevel", "difficulty", "createdAt"]
+    },
+    "Settings": {
+      "title": "Settings",
+      "description": "User notification, reminder, and Growth Guardian preferences",
+      "type": "object",
+      "properties": {
         "enabled": { "type": "boolean" },
-        "reminderTime": { "type": "string" },
-        "frequency": { "type": "string" },
-        "growthGuardianEnabled": { "type": "boolean" },
-        "quietHoursStart": { "type": "string" },
-        "quietHoursEnd": { "type": "string" },
+        "guardianAlerts": { "type": "boolean" },
+        "preferredHour": { "type": "number" },
+        "preferredMinute": { "type": "number" },
+        "frequency": { "type": "string", "maxLength": 50 },
+        "quietHoursStart": { "type": "number" },
+        "quietHoursEnd": { "type": "number" },
         "snoozedUntil": { "type": "string" },
-        "lastPromptSentAt": { "type": "string" }
-      }
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["enabled", "guardianAlerts", "updatedAt"]
+    },
+    "WeeklyReview": {
+      "title": "WeeklyReview",
+      "description": "Weekly synthesized growth review with key wins and blockers",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "weekStartDate": { "type": "string" },
+        "weekEndDate": { "type": "string" },
+        "completedExperimentsCount": { "type": "number" },
+        "totalCheckInsCount": { "type": "number" },
+        "reflectionsCount": { "type": "number" },
+        "keyWins": { "type": "array" },
+        "recurringBlockers": { "type": "array" },
+        "nextRecommendedExperiment": { "type": "object" },
+        "generatedAt": { "type": "string" }
+      },
+      "required": ["userId", "weekStartDate", "weekEndDate", "generatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/reflections/{reflectionId}": {
+      "schema": "Reflection",
+      "description": "Individual user reflections"
+    },
+    "/users/{userId}/experiments/{experimentId}": {
+      "schema": "Experiment",
+      "description": "User 7-day micro experiments"
+    },
+    "/users/{userId}/checkins/{checkinId}": {
+      "schema": "CheckIn",
+      "description": "Daily check-in logs"
+    },
+    "/users/{userId}/settings/{settingId}": {
+      "schema": "Settings",
+      "description": "User preferences and quiet hours"
+    },
+    "/users/{userId}/weeklyReviews/{reviewId}": {
+      "schema": "WeeklyReview",
+      "description": "Weekly growth retrospectives"
     }
   }
 }

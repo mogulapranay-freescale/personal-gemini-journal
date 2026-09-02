@@ -1,564 +1,781 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext.tsx';
 import {
-  subscribeUserReflections,
-  subscribeReflectionMessages,
-  saveJournalReflection,
-  saveReflectionMessage,
-  deleteJournalReflection,
-  subscribeGrowthExperiment,
-  saveGrowthExperiment,
-  subscribeNotificationSettings,
-  saveNotificationSettings,
-} from '../lib/firestoreService';
-import {
-  JournalReflection,
-  ChatMessage,
-  ReflectionMode,
-  GrowthExperiment,
+  Reflection,
+  Experiment,
+  CheckIn,
   NotificationSettings,
-  GrowthStatus,
-} from '../types';
-import { HistorySidebar } from './HistorySidebar';
-import { ReflectionView } from './ReflectionView';
-import { ReflectionComposer } from './ReflectionComposer';
-import { GrowthDashboard } from './GrowthDashboard';
-import { SmartNudgeBanner } from './SmartNudgeBanner';
-import { NotificationSettingsModal } from './NotificationSettingsModal';
+  GrowthTheme,
+  WeeklyReview,
+  Mood,
+  CheckInOutcome,
+  EnergyLevel,
+  DifficultyLevel,
+} from '../types.ts';
+import {
+  saveReflection,
+  updateReflection,
+  deleteReflection,
+  subscribeToReflections,
+  saveExperiment,
+  updateExperiment,
+  subscribeToExperiments,
+  saveCheckIn,
+  subscribeToCheckIns,
+  getSettings,
+  saveSettings,
+  saveWeeklyReview,
+  getWeeklyReviews,
+  DEFAULT_SETTINGS,
+} from '../lib/firestoreService.ts';
+import { HistorySidebar } from './HistorySidebar.tsx';
+import { ReflectionComposer } from './ReflectionComposer.tsx';
+import { ReflectionView } from './ReflectionView.tsx';
+import { GrowthDashboard } from './GrowthDashboard.tsx';
+import { SmartNudgeBanner } from './SmartNudgeBanner.tsx';
+import { CheckInModal } from './CheckInModal.tsx';
+import { NotificationSettingsModal } from './NotificationSettingsModal.tsx';
+import { ThemeSelector } from './ThemeSelector.tsx';
+import { useTheme } from '../context/ThemeContext.tsx';
 import {
   Sparkles,
+  Bell,
   LogOut,
-  User as UserIcon,
-  ShieldCheck,
+  User,
+  AlertCircle,
   PanelLeftClose,
   PanelLeftOpen,
-  Bell,
 } from 'lucide-react';
 
 export const Dashboard: React.FC = () => {
-  const { user, profile, signOut } = useAuth();
+  const { user, logout } = useAuth();
+  const { currentTheme } = useTheme();
 
-  const [reflections, setReflections] = useState<JournalReflection[]>([]);
-  const [selectedReflection, setSelectedReflection] = useState<JournalReflection | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [apiError, setApiError] = useState<string | null>(null);
+  const [reflections, setReflections] = useState<Reflection[]>([]);
+  const [experiments, setExperiments] = useState<Experiment[]>([]);
+  const [checkIns, setCheckIns] = useState<CheckIn[]>([]);
+  const [settings, setSettings] = useState<NotificationSettings>(DEFAULT_SETTINGS);
+  const [weeklyReviews, setWeeklyReviews] = useState<WeeklyReview[]>([]);
+  const [themes, setThemes] = useState<GrowthTheme[]>([]);
+
+  const [activeReflectionId, setActiveReflectionId] = useState<string | null>(null);
+  const [currentView, setCurrentView] = useState<'reflections' | 'growth'>('reflections');
+  const [isComposing, setIsComposing] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
-  const [activeView, setActiveView] = useState<'journal' | 'growth'>('journal');
 
-  // Growth Loop & Notification state
-  const [activeExperiment, setActiveExperiment] = useState<GrowthExperiment | null>(null);
-  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings | null>(null);
-  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
-  const [dismissedToday, setDismissedToday] = useState(false);
+  // Modals & UI States
+  const [checkInModalOpen, setCheckInModalOpen] = useState(false);
+  const [initialCheckInOutcome, setInitialCheckInOutcome] = useState<CheckInOutcome>('done');
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false);
+  const [nudgeDismissed, setNudgeDismissed] = useState(false);
 
-  // Composer prefill state
-  const [composerPrompt, setComposerPrompt] = useState<string>('');
-  const [composerCategory, setComposerCategory] = useState<JournalReflection['category']>('Daily Log');
+  // Loading States
+  const [composerLoading, setComposerLoading] = useState(false);
+  const [experimentLoading, setExperimentLoading] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [themesLoading, setThemesLoading] = useState(false);
+  const [weeklyReviewLoading, setWeeklyReviewLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Check today's dismissal from localStorage on mount
+  const userId = user?.uid || 'anonymous-user';
+
+  // Subscriptions
   useEffect(() => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const dismissed = localStorage.getItem(`nudge_dismissed_${todayStr}`);
-    if (dismissed === 'true') {
-      setDismissedToday(true);
-    }
-  }, []);
+    if (!user) return;
 
-  // 1. Subscribe to user reflections
-  useEffect(() => {
-    if (!user?.uid) return;
-    setLoadingHistory(true);
-
-    const unsubscribe = subscribeUserReflections(
-      user.uid,
-      (data) => {
-        setReflections(data);
-        setLoadingHistory(false);
-        // If current selection is still in list, update it
-        if (selectedReflection) {
-          const updated = data.find((r) => r.id === selectedReflection.id);
-          if (updated) {
-            setSelectedReflection(updated);
-          }
-        }
-      },
-      (err) => {
-        console.error('Failed to load user reflections:', err);
-        setLoadingHistory(false);
+    const unsubReflections = subscribeToReflections(userId, list => {
+      setReflections(list);
+      if (list.length > 0 && !activeReflectionId && !isComposing) {
+        setActiveReflectionId(list[0].id);
+      } else if (list.length === 0) {
+        setIsComposing(true);
       }
-    );
+    });
 
-    return () => unsubscribe();
-  }, [user?.uid]);
+    const unsubExperiments = subscribeToExperiments(userId, list => {
+      setExperiments(list);
+    });
 
-  // 2. Subscribe to messages of active reflection
-  useEffect(() => {
-    if (!user?.uid || !selectedReflection?.id) {
-      setMessages([]);
-      return;
-    }
+    const unsubCheckIns = subscribeToCheckIns(userId, list => {
+      setCheckIns(list);
+    });
 
-    const unsubscribe = subscribeReflectionMessages(
-      user.uid,
-      selectedReflection.id,
-      (msgs) => {
-        setMessages(msgs);
-      }
-    );
+    getSettings(userId).then(s => setSettings(s)).catch(console.error);
+    getWeeklyReviews(userId).then(w => setWeeklyReviews(w)).catch(console.error);
 
-    return () => unsubscribe();
-  }, [user?.uid, selectedReflection?.id]);
-
-  // 3. Subscribe to active growth experiment
-  useEffect(() => {
-    if (!user?.uid) return;
-    const unsubscribe = subscribeGrowthExperiment(
-      user.uid,
-      (exp) => {
-        setActiveExperiment(exp);
-      },
-      (err) => {
-        console.error('Failed to load growth experiment:', err);
-      }
-    );
-    return () => unsubscribe();
-  }, [user?.uid]);
-
-  // 4. Subscribe to notification settings
-  useEffect(() => {
-    if (!user?.uid) return;
-    const unsubscribe = subscribeNotificationSettings(
-      user.uid,
-      (settings) => {
-        setNotificationSettings(settings);
-      },
-      (err) => {
-        console.error('Failed to load notification settings:', err);
-      }
-    );
-    return () => unsubscribe();
-  }, [user?.uid]);
-
-  const handleStartNewReflection = () => {
-    setSelectedReflection(null);
-    setComposerPrompt('');
-    setComposerCategory('Daily Log');
-    setMessages([]);
-    setApiError(null);
-    setActiveView('journal');
-  };
-
-  const handleStartNewWithPrompt = (promptText: string, category?: JournalReflection['category']) => {
-    setSelectedReflection(null);
-    setComposerPrompt(promptText);
-    if (category) {
-      setComposerCategory(category);
-    }
-    setMessages([]);
-    setApiError(null);
-    setActiveView('journal');
-  };
-
-  const handleSelectReflection = (reflection: JournalReflection) => {
-    setSelectedReflection(reflection);
-    setComposerPrompt('');
-    setApiError(null);
-    setActiveView('journal');
-  };
-
-  const handleDeleteReflection = async (id: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!user?.uid) return;
-    try {
-      await deleteJournalReflection(user.uid, id);
-      if (selectedReflection?.id === id) {
-        handleStartNewReflection();
-      }
-    } catch (err: any) {
-      console.error('Failed to delete reflection:', err);
-      setApiError('Failed to delete entry from Firestore.');
-    }
-  };
-
-  const handleDismissToday = () => {
-    const todayStr = new Date().toISOString().slice(0, 10);
-    localStorage.setItem(`nudge_dismissed_${todayStr}`, 'true');
-    setDismissedToday(true);
-  };
-
-  const handleSnooze = async () => {
-    // Snooze for 4 hours
-    const snoozeUntil = new Date(Date.now() + 4 * 60 * 60 * 1000).toISOString();
-    if (user?.uid && notificationSettings) {
-      const updated: NotificationSettings = {
-        ...notificationSettings,
-        snoozedUntil: snoozeUntil,
-      };
-      await saveNotificationSettings(user.uid, updated);
-      setNotificationSettings(updated);
-    }
-    handleDismissToday();
-  };
-
-  const handleUpdateExperiment = async (exp: GrowthExperiment) => {
-    if (!user?.uid) return;
-    await saveGrowthExperiment(user.uid, exp);
-    setActiveExperiment(exp);
-  };
-
-  const handleUpdateExperimentStatus = async (status: GrowthStatus, note?: string) => {
-    if (!user?.uid || !activeExperiment) return;
-    const currentSkips = activeExperiment.skipCount || 0;
-    const currentCompletions = activeExperiment.completionCount || 0;
-
-    const updated: GrowthExperiment = {
-      ...activeExperiment,
-      status,
-      statusNote: note,
-      skipCount: status === 'skipped' ? currentSkips + 1 : currentSkips,
-      completionCount: status === 'completed' ? currentCompletions + 1 : currentCompletions,
-      completedAt: status === 'completed' ? new Date().toISOString() : activeExperiment.completedAt,
-      updatedAt: new Date().toISOString(),
-      history: [
-        ...(activeExperiment.history || []),
-        {
-          date: new Date().toISOString().slice(0, 10),
-          status,
-          note,
-        },
-      ],
+    return () => {
+      unsubReflections();
+      unsubExperiments();
+      unsubCheckIns();
     };
-    await saveGrowthExperiment(user.uid, updated);
-    setActiveExperiment(updated);
-  };
+  }, [user, userId]);
 
-  const handleAdoptAdaptedPlan = async (actionText: string, frequency: string) => {
-    if (!user?.uid) return;
-    const newExp: GrowthExperiment = {
-      id: `exp_adapted_${Date.now()}`,
-      goal: 'Overcome friction with right-sized daily routine',
-      action: actionText,
-      targetFrequency: frequency,
-      timeframe: 'Next 7 days',
-      successSignal: 'Progress reported in reflection logs',
-      status: 'in_progress',
-      skipCount: 0,
-      completionCount: 0,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    };
-    await saveGrowthExperiment(user.uid, newExp);
-    setActiveExperiment(newExp);
-  };
+  const activeReflection = reflections.find(r => r.id === activeReflectionId) || null;
+  const activeExperiment = experiments.find(e => e.status === 'active') || null;
 
-  const handleSaveNotificationPreferences = async (newSettings: NotificationSettings) => {
-    if (!user?.uid) return;
-    await saveNotificationSettings(user.uid, newSettings);
-    setNotificationSettings(newSettings);
-  };
-
-  const handleSendMessage = async ({
-    prompt,
-    mode,
-    title,
-    category,
-  }: {
-    prompt: string;
-    mode: ReflectionMode;
+  // 1. Save and Analyze Reflection
+  const handleSaveAndAnalyze = async (data: {
     title: string;
-    category: JournalReflection['category'];
+    content: string;
+    mood?: Mood;
+    tags: string[];
   }) => {
-    if (!user?.uid) return;
-    setIsGenerating(true);
-    setApiError(null);
+    setComposerLoading(true);
+    setErrorMessage(null);
 
-    const timestamp = new Date().toISOString();
-    const reflectionId =
-      selectedReflection?.id || `ref_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const userMessageId = `msg_${Date.now()}_u`;
-    const modelMessageId = `msg_${Date.now() + 1}_m`;
-
-    const userMessage: ChatMessage = {
-      id: userMessageId,
-      reflectionId,
-      userId: user.uid,
-      role: 'user',
-      content: prompt,
-      mode,
-      timestamp,
-    };
-
-    // Construct context history for multi-turn conversational Gemini prompt
-    const contextHistory = messages.map((m) => ({
-      role: m.role,
-      text: m.content,
-    }));
+    const newId = `ref_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const now = new Date().toISOString();
 
     try {
-      // 1. Call server-side Gemini endpoint with resilient fallback
-      const response = await fetch('/api/gemini/reflect', {
+      // Analyze with Gemini
+      const response = await fetch('/api/gemini/analyze-reflection', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt,
-          mode,
-          contextHistory,
-          entryTitle: title || selectedReflection?.title || 'Journal Reflection',
+          title: data.title,
+          content: data.content,
+          mood: data.mood,
         }),
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.error || `Server responded with ${response.status}`);
+        throw new Error(`Analysis failed with HTTP status ${response.status}`);
       }
 
-      const aiData = await response.json();
+      const analysis = await response.json();
 
-      const modelMessage: ChatMessage = {
-        id: modelMessageId,
-        reflectionId,
-        userId: user.uid,
-        role: 'model',
-        content: aiData.reply || 'Reflection generated.',
-        mode,
-        timestamp: new Date().toISOString(),
+      const newReflection: Reflection = {
+        id: newId,
+        userId,
+        title: data.title,
+        content: data.content,
+        mood: data.mood,
+        tags: data.tags,
+        summary: analysis.summary,
+        keyTakeaways: analysis.keyTakeaways,
+        actionSteps: analysis.actionSteps,
+        followUpQuestions: analysis.followUpQuestions,
+        chatHistory: [],
+        createdAt: now,
+        updatedAt: now,
       };
 
-      // 2. Build or update reflection metadata document
-      const currentTurnCount = (selectedReflection?.turnCount || 0) + 1;
-      const updatedReflection: JournalReflection = {
-        id: reflectionId,
-        userId: user.uid,
-        title: title || selectedReflection?.title || prompt.slice(0, 40),
-        category: category || selectedReflection?.category || 'Daily Log',
-        initialPrompt: selectedReflection?.initialPrompt || prompt,
-        summary: aiData.summary || selectedReflection?.summary || '',
-        brainstormIdeas: [
-          ...(aiData.brainstormIdeas || []),
-          ...(selectedReflection?.brainstormIdeas || []),
-        ].slice(0, 8),
-        keyInsights: [
-          ...(aiData.keyInsights || []),
-          ...(selectedReflection?.keyInsights || []),
-        ].slice(0, 6),
-        turnCount: currentTurnCount,
-        createdAt: selectedReflection?.createdAt || timestamp,
-        updatedAt: new Date().toISOString(),
+      await saveReflection(userId, newReflection);
+      setActiveReflectionId(newId);
+      setIsComposing(false);
+      setCurrentView('reflections');
+    } catch (err: unknown) {
+      console.error('Error analyzing reflection:', err);
+      // Fallback save without analysis if network/API drops
+      const fallbackReflection: Reflection = {
+        id: newId,
+        userId,
+        title: data.title,
+        content: data.content,
+        mood: data.mood,
+        tags: data.tags,
+        summary: 'Your reflection has been recorded.',
+        keyTakeaways: ['Maintained consistent reflection habit.'],
+        actionSteps: ['Take a 5-minute pause to prioritize your next task.'],
+        followUpQuestions: ['What is the most important lesson from this entry?'],
+        chatHistory: [],
+        createdAt: now,
+        updatedAt: now,
       };
-
-      // 3. Atomically save reflection document and both messages in Firestore
-      await saveJournalReflection(user.uid, updatedReflection);
-      await saveReflectionMessage(user.uid, reflectionId, userMessage);
-      await saveReflectionMessage(user.uid, reflectionId, modelMessage);
-
-      // 4. Update UI active selection and clear composer prefill
-      setSelectedReflection(updatedReflection);
-      setComposerPrompt('');
-      setActiveView('journal');
-    } catch (err: any) {
-      console.error('Error during reflection generation/save:', err);
-      setApiError(err?.message || 'Failed to generate reflection with Gemini. Please try again.');
-      throw err;
+      await saveReflection(userId, fallbackReflection);
+      setActiveReflectionId(newId);
+      setIsComposing(false);
+      setErrorMessage('Gemini analysis was delayed, but your reflection was safely saved!');
     } finally {
-      setIsGenerating(false);
+      setComposerLoading(false);
     }
   };
 
-  return (
-    <div id="dashboard-container" className="min-h-screen bg-slate-950 text-slate-100 flex flex-col">
-      {/* Top Navigation Bar */}
-      <header id="dashboard-header" className="bg-slate-900/90 border-b border-slate-800 px-4 sm:px-6 py-3.5 flex items-center justify-between z-10 backdrop-blur-md">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-            className="p-2 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition-colors cursor-pointer"
-            title={isSidebarOpen ? 'Hide entries history' : 'Show entries history'}
-          >
-            {isSidebarOpen ? <PanelLeftClose className="w-5 h-5" /> : <PanelLeftOpen className="w-5 h-5" />}
-          </button>
+  // 2. Turn reflection into 7-day micro experiment
+  const handleCreateExperiment = async (reflection: Reflection) => {
+    setExperimentLoading(true);
+    setErrorMessage(null);
 
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-violet-500 flex items-center justify-center shadow-md shadow-indigo-500/20">
-              <Sparkles className="w-4 h-4 text-white" />
-            </div>
-            <div>
-              <h1 className="text-sm font-bold text-white leading-tight">Gemini Reflections</h1>
-              <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-medium">
-                <ShieldCheck className="w-3 h-3" /> User-Isolated Storage
-              </span>
-            </div>
+    try {
+      let gen: { title?: string; description?: string; category?: string } = {};
+
+      try {
+        const response = await fetch('/api/gemini/generate-experiment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: reflection.title || 'Personal Reflection',
+            content: reflection.content || reflection.summary || 'Mindful habit and personal growth execution',
+          }),
+        });
+
+        if (response.ok) {
+          gen = await response.json();
+        }
+      } catch (networkErr) {
+        console.warn('Network issue generating experiment, utilizing smart fallback:', networkErr);
+      }
+
+      const expTitle = (typeof gen?.title === 'string' && gen.title.trim())
+        ? gen.title.trim()
+        : (reflection.actionSteps?.[0]
+            ? `7-Day Habit: ${reflection.actionSteps[0]}`
+            : `7-Day Growth: ${reflection.title || 'Daily Focus'}`);
+
+      const expDesc = (typeof gen?.description === 'string' && gen.description.trim())
+        ? gen.description.trim()
+        : (reflection.actionSteps?.[0]
+            ? `Execute daily: ${reflection.actionSteps[0]}. Keep friction low and track completion.`
+            : `Dedicate 15-20 minutes daily to consistent progress based on "${reflection.title || 'your reflection'}".`);
+
+      const validCategories: Experiment['category'][] = ['focus', 'energy', 'boundaries', 'mindset', 'skills', 'wellness'];
+      const expCategory: Experiment['category'] = validCategories.includes(gen?.category as Experiment['category'])
+        ? (gen.category as Experiment['category'])
+        : 'focus';
+
+      const expId = `exp_${Date.now()}`;
+      const now = new Date().toISOString();
+
+      const newExp: Experiment = {
+        id: expId,
+        userId,
+        title: expTitle,
+        description: expDesc,
+        category: expCategory,
+        targetDays: 7,
+        completedDays: 0,
+        skippedDays: 0,
+        status: 'active',
+        streak: 0,
+        reflectionSourceId: reflection.id,
+        reflectionSourceTitle: reflection.title || 'Personal Reflection',
+        adaptationsHistory: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      // Set any previously active experiments to paused
+      for (const e of experiments) {
+        if (e.status === 'active') {
+          await updateExperiment(userId, e.id, { status: 'paused' });
+        }
+      }
+
+      await saveExperiment(userId, newExp);
+      setCurrentView('growth');
+    } catch (err) {
+      console.error('Create experiment error:', err);
+      setErrorMessage('Could not save experiment. Please check your connection and retry.');
+    } finally {
+      setExperimentLoading(false);
+    }
+  };
+
+  // 3. Multi-turn reflection chat
+  const handleSendChatMessage = async (reflectionId: string, message: string) => {
+    if (!activeReflection) return;
+    setChatLoading(true);
+
+    const now = new Date().toISOString();
+    const userMsg = { id: `msg_${Date.now()}`, role: 'user' as const, content: message, timestamp: now };
+    const updatedHistory = [...(activeReflection.chatHistory || []), userMsg];
+
+    // Optimistic UI update
+    await updateReflection(userId, reflectionId, { chatHistory: updatedHistory });
+
+    try {
+      const response = await fetch('/api/gemini/reflection-chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reflectionContent: activeReflection.content,
+          chatHistory: updatedHistory,
+          message,
+        }),
+      });
+
+      if (!response.ok) throw new Error('Chat generation failed');
+      const data = await response.json();
+
+      const aiMsg = {
+        id: `msg_${Date.now() + 1}`,
+        role: 'assistant' as const,
+        content: data.reply,
+        timestamp: new Date().toISOString(),
+      };
+
+      await updateReflection(userId, reflectionId, {
+        chatHistory: [...updatedHistory, aiMsg],
+      });
+    } catch (err) {
+      console.error('Chat error:', err);
+      const fallbackAiMsg = {
+        id: `msg_${Date.now() + 1}`,
+        role: 'assistant' as const,
+        content: "I hear you. Taking this one step at a time is the best way forward. What feels like the easiest next action you can take?",
+        timestamp: new Date().toISOString(),
+      };
+      await updateReflection(userId, reflectionId, {
+        chatHistory: [...updatedHistory, fallbackAiMsg],
+      });
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
+  // 4. Submit Daily Check-in
+  const handleSubmitCheckIn = async (data: {
+    outcome: CheckInOutcome;
+    energyLevel: EnergyLevel;
+    difficulty: DifficultyLevel;
+    notes: string;
+  }) => {
+    if (!activeExperiment) return;
+
+    const checkInId = `chk_${Date.now()}`;
+    const todayStr = new Date().toISOString().split('T')[0];
+
+    try {
+      // Get AI Feedback
+      let feedback = '';
+      try {
+        const fbRes = await fetch('/api/gemini/checkin-feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            experimentTitle: activeExperiment.title,
+            outcome: data.outcome,
+            energyLevel: data.energyLevel,
+            difficulty: data.difficulty,
+            notes: data.notes,
+          }),
+        });
+        if (fbRes.ok) {
+          const json = await fbRes.json();
+          feedback = json.feedback;
+        }
+      } catch (fbErr) {
+        console.warn('Feedback generation skipped:', fbErr);
+      }
+
+      const newCheckIn: CheckIn = {
+        id: checkInId,
+        userId,
+        experimentId: activeExperiment.id,
+        experimentTitle: activeExperiment.title,
+        date: todayStr,
+        outcome: data.outcome,
+        energyLevel: data.energyLevel,
+        difficulty: data.difficulty,
+        notes: data.notes,
+        feedback,
+        createdAt: new Date().toISOString(),
+      };
+
+      await saveCheckIn(userId, newCheckIn);
+
+      // Update experiment completed/skipped counts
+      const newCompleted = data.outcome === 'done' ? activeExperiment.completedDays + 1 : activeExperiment.completedDays;
+      const newSkipped = data.outcome === 'skipped' ? activeExperiment.skippedDays + 1 : activeExperiment.skippedDays;
+      const newStreak = data.outcome === 'done' ? activeExperiment.streak + 1 : (data.outcome === 'skipped' ? 0 : activeExperiment.streak);
+      const isCompleted = newCompleted >= activeExperiment.targetDays;
+
+      await updateExperiment(userId, activeExperiment.id, {
+        completedDays: newCompleted,
+        skippedDays: newSkipped,
+        streak: newStreak,
+        lastCheckInDate: todayStr,
+        status: isCompleted ? 'completed' : 'active',
+      });
+    } catch (err) {
+      console.error('Failed to submit check-in:', err);
+      setErrorMessage('Could not record check-in. Please try again.');
+    }
+  };
+
+  // 5. Adapt Stalled Plan
+  const handleAdaptPlan = async () => {
+    if (!activeExperiment) return;
+    setErrorMessage(null);
+
+    try {
+      const res = await fetch('/api/gemini/adapt-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          currentExperiment: {
+            title: activeExperiment.title,
+            description: activeExperiment.description,
+            category: activeExperiment.category,
+          },
+          frictionReason: 'Consecutive skipped check-ins or reported high friction',
+        }),
+      });
+
+      if (!res.ok) throw new Error('Plan adaptation failed');
+      const adapted = await res.json();
+
+      const adaptationEntry = {
+        date: new Date().toISOString(),
+        previousTitle: activeExperiment.title,
+        newTitle: adapted.newTitle,
+        reason: adapted.adaptationReason,
+      };
+
+      await updateExperiment(userId, activeExperiment.id, {
+        title: adapted.newTitle,
+        description: adapted.newDescription,
+        adaptationsHistory: [...(activeExperiment.adaptationsHistory || []), adaptationEntry],
+      });
+    } catch (err) {
+      console.error('Error adapting plan:', err);
+      setErrorMessage('Failed to adapt plan automatically.');
+    }
+  };
+
+  // 6. Generate Growth Themes & Patterns
+  const handleGenerateGrowthThemes = async () => {
+    setThemesLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/gemini/analyze-growth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reflections: reflections.map(r => ({
+            id: r.id,
+            title: r.title,
+            content: r.content,
+            mood: r.mood,
+            createdAt: r.createdAt,
+          })),
+          checkIns: checkIns.map(c => ({
+            date: c.date,
+            outcome: c.outcome,
+            energyLevel: c.energyLevel,
+            notes: c.notes,
+          })),
+        }),
+      });
+
+      if (!res.ok) throw new Error('Pattern analysis failed');
+      const data = await res.json();
+      setThemes(data.themes || []);
+    } catch (err) {
+      console.error('Themes analysis error:', err);
+      setErrorMessage('Failed to synthesize growth patterns.');
+    } finally {
+      setThemesLoading(false);
+    }
+  };
+
+  // 7. Generate Weekly Review
+  const handleGenerateWeeklyReview = async () => {
+    setWeeklyReviewLoading(true);
+    setErrorMessage(null);
+    try {
+      const res = await fetch('/api/gemini/weekly-review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reflections: reflections.slice(0, 7).map(r => ({ title: r.title, content: r.content })),
+          checkIns: checkIns.slice(0, 7).map(c => ({ date: c.date, outcome: c.outcome, notes: c.notes })),
+          experiment: activeExperiment ? {
+            title: activeExperiment.title,
+            completedDays: activeExperiment.completedDays,
+            targetDays: activeExperiment.targetDays,
+          } : undefined,
+        }),
+      });
+
+      if (!res.ok) throw new Error('Weekly review generation failed');
+      const reviewData = await res.json();
+
+      const weekStart = new Date(Date.now() - 7 * 86400000).toISOString();
+      const weekEnd = new Date().toISOString();
+      const reviewId = `rev_${Date.now()}`;
+
+      const newReview: WeeklyReview = {
+        id: reviewId,
+        userId,
+        weekStartDate: weekStart,
+        weekEndDate: weekEnd,
+        completedExperimentsCount: experiments.filter(e => e.status === 'completed').length,
+        totalCheckInsCount: checkIns.length,
+        reflectionsCount: reflections.length,
+        keyWins: reviewData.keyWins,
+        recurringBlockers: reviewData.recurringBlockers,
+        nextRecommendedExperiment: reviewData.nextRecommendedExperiment,
+        generatedAt: new Date().toISOString(),
+      };
+
+      await saveWeeklyReview(userId, newReview);
+      setWeeklyReviews(prev => [newReview, ...prev]);
+    } catch (err) {
+      console.error('Weekly review error:', err);
+      setErrorMessage('Failed to generate weekly review.');
+    } finally {
+      setWeeklyReviewLoading(false);
+    }
+  };
+
+  // 8. Save Notification Settings
+  const handleSaveSettings = async (newSettings: Partial<NotificationSettings>) => {
+    await saveSettings(userId, newSettings);
+    setSettings(prev => ({ ...prev, ...newSettings }));
+  };
+
+  return (
+    <div className="flex h-screen bg-stone-50 dark:bg-slate-950 overflow-hidden font-sans text-stone-900 dark:text-slate-100">
+      {/* Mobile Sidebar Overlay Drawer */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 z-40 md:hidden flex">
+          <div
+            className="fixed inset-0 bg-stone-900/50 dark:bg-black/60 backdrop-blur-xs transition-opacity"
+            onClick={() => setIsSidebarOpen(false)}
+            aria-label="Close sidebar backdrop"
+          />
+          <div className="relative z-50 w-80 max-w-[85vw] h-full shadow-2xl">
+            <HistorySidebar
+              reflections={reflections}
+              activeReflectionId={activeReflectionId}
+              onSelectReflection={id => {
+                setActiveReflectionId(id);
+                setIsComposing(false);
+              }}
+              onNewReflection={() => {
+                setIsComposing(true);
+                setActiveReflectionId(null);
+                setCurrentView('reflections');
+              }}
+              onDeleteReflection={async id => {
+                await deleteReflection(userId, id);
+                if (activeReflectionId === id) {
+                  setActiveReflectionId(reflections.find(r => r.id !== id)?.id || null);
+                }
+              }}
+              currentView={currentView}
+              onSwitchView={view => {
+                setCurrentView(view);
+                if (view === 'reflections' && !activeReflectionId && reflections.length > 0) {
+                  setActiveReflectionId(reflections[0].id);
+                }
+              }}
+              onClose={() => setIsSidebarOpen(false)}
+            />
           </div>
         </div>
+      )}
 
-        {/* User Profile, Reminders & Sign Out */}
-        <div className="flex items-center gap-2.5 sm:gap-3">
-          <button
-            id="btn-open-reminders"
-            onClick={() => setIsSettingsModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-all cursor-pointer"
-            title="Reflection Reminders & Growth Guardian Preferences"
-          >
-            <Bell className="w-3.5 h-3.5 text-indigo-400" />
-            <span className="hidden md:inline">Reminders & Guardian</span>
-          </button>
+      {/* Desktop Collapsible Sidebar */}
+      <div className={`hidden md:flex transition-all duration-200 shrink-0 ${isSidebarOpen ? 'w-80' : 'w-0 overflow-hidden border-r-0'}`}>
+        <HistorySidebar
+          reflections={reflections}
+          activeReflectionId={activeReflectionId}
+          onSelectReflection={id => {
+            setActiveReflectionId(id);
+            setIsComposing(false);
+          }}
+          onNewReflection={() => {
+            setIsComposing(true);
+            setActiveReflectionId(null);
+            setCurrentView('reflections');
+          }}
+          onDeleteReflection={async id => {
+            await deleteReflection(userId, id);
+            if (activeReflectionId === id) {
+              setActiveReflectionId(reflections.find(r => r.id !== id)?.id || null);
+            }
+          }}
+          currentView={currentView}
+          onSwitchView={view => {
+            setCurrentView(view);
+            if (view === 'reflections' && !activeReflectionId && reflections.length > 0) {
+              setActiveReflectionId(reflections[0].id);
+            }
+          }}
+          onClose={() => setIsSidebarOpen(false)}
+        />
+      </div>
 
-          <div className="hidden sm:flex items-center gap-2 text-right">
-            {profile?.photoURL ? (
-              <img
-                src={profile.photoURL}
-                alt={profile.displayName || 'User'}
-                referrerPolicy="no-referrer"
-                className="w-7 h-7 rounded-full border border-slate-700 object-cover"
-              />
-            ) : (
-              <div className="w-7 h-7 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300">
-                <UserIcon className="w-3.5 h-3.5" />
-              </div>
-            )}
-            <span className="text-xs font-medium text-slate-200 max-w-[120px] truncate">
-              {profile?.displayName || user?.displayName || user?.email || 'User'}
+      {/* Main App Content View */}
+      <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        {/* Top Header Bar */}
+        <header className="h-14 border-b border-stone-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs px-4 sm:px-6 flex items-center justify-between shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              id="toggle-sidebar-btn"
+              onClick={() => setIsSidebarOpen(prev => !prev)}
+              className="p-1.5 text-stone-500 dark:text-slate-400 hover:text-stone-900 dark:hover:text-white rounded-lg hover:bg-stone-100 dark:hover:bg-slate-800 transition-colors"
+              title={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+              aria-label={isSidebarOpen ? "Hide sidebar" : "Show sidebar"}
+            >
+              {isSidebarOpen ? (
+                <PanelLeftClose className="w-4 h-4" />
+              ) : (
+                <PanelLeftOpen className="w-4 h-4" />
+              )}
+            </button>
+
+            <div
+              className="w-7 h-7 rounded-lg flex items-center justify-center text-white transition-colors duration-200"
+              style={{ backgroundColor: currentTheme.primaryColor }}
+            >
+              <Sparkles className="w-4 h-4 text-white/90" />
+            </div>
+            <span className="font-serif font-bold text-sm tracking-tight text-stone-900 dark:text-white">
+              Gemini Reflection
+            </span>
+            <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${currentTheme.badgeBg} ${currentTheme.badgeText}`}>
+              My Growth Loop
             </span>
           </div>
 
-          <button
-            id="btn-signout"
-            onClick={signOut}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/60 hover:text-rose-300 hover:border-rose-800 border border-slate-700 text-slate-300 text-xs font-medium transition-all cursor-pointer"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span>Sign Out</span>
-          </button>
-        </div>
-      </header>
+          <div className="flex items-center gap-2.5">
+            {/* Theme Selector Palette */}
+            <ThemeSelector />
 
-      {/* Dashboard Body Workspace */}
-      <div id="dashboard-body" className="flex-1 flex overflow-hidden">
-        {/* Sidebar */}
-        {isSidebarOpen && (
-          <HistorySidebar
-            reflections={reflections}
-            activeId={selectedReflection?.id || null}
-            activeView={activeView}
-            onSelectReflection={handleSelectReflection}
-            onNewReflection={handleStartNewReflection}
-            onSelectView={(view) => setActiveView(view)}
-            onDeleteReflection={handleDeleteReflection}
-            isLoading={loadingHistory}
-          />
-        )}
+            <button
+              id="open-settings-modal-btn"
+              onClick={() => setSettingsModalOpen(true)}
+              className="p-2 text-stone-500 dark:text-slate-400 hover:text-stone-800 dark:hover:text-slate-200 rounded-lg hover:bg-stone-100 dark:hover:bg-slate-800 transition-colors"
+              title="Notification & Guardian Preferences"
+            >
+              <Bell className="w-4 h-4" />
+            </button>
 
-        {/* Main Conversation & Composer Stage OR Growth Dashboard */}
-        {activeView === 'growth' ? (
-          <main id="dashboard-growth-stage" className="flex-1 flex flex-col bg-slate-950 overflow-y-auto">
-            {/* Smart Growth Guardian Nudge Banner (if active) */}
-            <div className="p-4 pb-0 max-w-6xl mx-auto w-full">
-              <SmartNudgeBanner
-                reflections={reflections}
-                currentExperiment={activeExperiment}
-                settings={notificationSettings}
-                dismissedToday={dismissedToday}
-                onDismissToday={handleDismissToday}
-                onSnooze={handleSnooze}
-                onOpenSettings={() => setIsSettingsModalOpen(true)}
-                onCheckIn={(promptText) => handleStartNewWithPrompt(promptText, 'Work & Focus')}
-                onUpdateExperimentStatus={handleUpdateExperimentStatus}
-                onAdoptAdaptedPlan={handleAdoptAdaptedPlan}
-              />
+            <div className="h-4 w-px bg-stone-200 dark:bg-slate-750" />
+
+            <div className="flex items-center gap-2 text-xs text-stone-600 dark:text-slate-300">
+              <div className="w-6 h-6 rounded-full bg-stone-200 dark:bg-slate-800 text-stone-700 dark:text-slate-200 flex items-center justify-center text-[10px] font-bold">
+                {user?.email?.charAt(0).toUpperCase() || <User className="w-3.5 h-3.5" />}
+              </div>
+              <span className="hidden sm:inline-block max-w-[120px] truncate">{user?.email || 'Guest User'}</span>
+              <button
+                id="logout-btn"
+                onClick={logout}
+                className="p-1.5 text-stone-400 dark:text-slate-500 hover:text-rose-600 dark:hover:text-rose-400 rounded-md transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
+          </div>
+        </header>
 
-            <GrowthDashboard
-              userId={user?.uid}
-              reflections={reflections}
+        {/* Workspace Body */}
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+          {errorMessage && (
+            <div className="mb-4 p-3.5 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-xs flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+              <button
+                onClick={() => setErrorMessage(null)}
+                aria-label="Dismiss error message"
+                className="text-amber-600 hover:text-amber-900 font-bold ml-2"
+              >
+                &times;
+              </button>
+            </div>
+          )}
+
+          {/* Growth Guardian Smart Nudge */}
+          {!nudgeDismissed && (
+            <SmartNudgeBanner
               activeExperiment={activeExperiment}
-              onUpdateExperiment={handleUpdateExperiment}
-              onStartNewWithPrompt={handleStartNewWithPrompt}
-              onStartNew={handleStartNewReflection}
-              onOpenReminders={() => setIsSettingsModalOpen(true)}
-              onSelectReflection={(r) => {
-                setSelectedReflection(r);
-                setActiveView('journal');
+              recentCheckIns={checkIns}
+              reflections={reflections}
+              settings={settings}
+              onOpenCheckIn={outcome => {
+                setInitialCheckInOutcome(outcome || 'done');
+                setCheckInModalOpen(true);
               }}
+              onAdaptPlan={handleAdaptPlan}
+              onOpenSettings={() => setSettingsModalOpen(true)}
+              onDismiss={() => setNudgeDismissed(true)}
             />
-          </main>
-        ) : (
-          <main id="dashboard-stage" className="flex-1 flex flex-col bg-slate-950 overflow-y-auto">
-            <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 flex-1 flex flex-col justify-between">
-              {/* Smart Growth Guardian Nudge Banner (if active) */}
-              <div className="mb-4">
-                <SmartNudgeBanner
-                  reflections={reflections}
-                  currentExperiment={activeExperiment}
-                  settings={notificationSettings}
-                  dismissedToday={dismissedToday}
-                  onDismissToday={handleDismissToday}
-                  onSnooze={handleSnooze}
-                  onOpenSettings={() => setIsSettingsModalOpen(true)}
-                  onCheckIn={(promptText) => handleStartNewWithPrompt(promptText, 'Work & Focus')}
-                  onUpdateExperimentStatus={handleUpdateExperimentStatus}
-                  onAdoptAdaptedPlan={handleAdoptAdaptedPlan}
-                />
-              </div>
+          )}
 
-              {/* If a reflection is active, show the thread */}
-              {selectedReflection ? (
-                <ReflectionView
-                  reflection={selectedReflection}
-                  messages={messages}
-                  onSelectSuggestion={(text) => {
-                    handleSendMessage({
-                      prompt: text,
-                      mode: 'brainstorm',
-                      title: selectedReflection.title,
-                      category: selectedReflection.category,
-                    });
-                  }}
-                />
-              ) : (
-                <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center text-indigo-400 mb-4 shadow-inner">
-                    <Sparkles className="w-7 h-7" />
-                  </div>
-                  <h3 className="text-xl font-bold text-white">Start a New Reflection</h3>
-                  <p className="mt-2 text-sm text-slate-400 max-w-md leading-relaxed">
-                    Reflect on decisions, journal your day, or brainstorm ideas with Gemini. All dialogues are saved privately to your Firestore account.
-                  </p>
-                </div>
-              )}
-
-              {/* Reflection Composer */}
-              <div className="sticky bottom-0 pt-4 bg-gradient-to-t from-slate-950 via-slate-950/90 to-transparent">
-                <ReflectionComposer
-                  currentReflection={selectedReflection}
-                  initialPromptText={composerPrompt}
-                  initialCategory={composerCategory}
-                  onSendMessage={handleSendMessage}
-                  isGenerating={isGenerating}
-                  error={apiError}
-                  onRetry={() => {
-                    if (selectedReflection?.initialPrompt) {
-                      handleSendMessage({
-                        prompt: selectedReflection.initialPrompt,
-                        mode: 'reflect',
-                        title: selectedReflection.title,
-                        category: selectedReflection.category,
-                      });
-                    }
-                  }}
-                />
-              </div>
+          {/* View Routing */}
+          {currentView === 'growth' ? (
+            <GrowthDashboard
+              activeExperiment={activeExperiment}
+              experiments={experiments}
+              checkIns={checkIns}
+              reflections={reflections}
+              weeklyReviews={weeklyReviews}
+              settings={settings}
+              onOpenCheckIn={outcome => {
+                setInitialCheckInOutcome(outcome || 'done');
+                setCheckInModalOpen(true);
+              }}
+              onAdaptPlan={handleAdaptPlan}
+              onSelectReflection={id => {
+                setActiveReflectionId(id);
+                setIsComposing(false);
+                setCurrentView('reflections');
+              }}
+              onGenerateGrowthThemes={handleGenerateGrowthThemes}
+              onGenerateWeeklyReview={handleGenerateWeeklyReview}
+              themes={themes}
+              themesLoading={themesLoading}
+              weeklyReviewLoading={weeklyReviewLoading}
+            />
+          ) : isComposing ? (
+            <ReflectionComposer
+              onSaveAndAnalyze={handleSaveAndAnalyze}
+              loading={composerLoading}
+            />
+          ) : activeReflection ? (
+            <ReflectionView
+              reflection={activeReflection}
+              onDelete={async id => {
+                await deleteReflection(userId, id);
+                setActiveReflectionId(reflections.find(r => r.id !== id)?.id || null);
+              }}
+              onCreateExperiment={handleCreateExperiment}
+              onSendChatMessage={handleSendChatMessage}
+              experimentLoading={experimentLoading}
+              chatLoading={chatLoading}
+            />
+          ) : (
+            <div className="h-full flex flex-col items-center justify-center text-center p-8 text-stone-400 dark:text-slate-500 space-y-3">
+              <Sparkles className={`w-10 h-10 ${currentTheme.iconAccent}`} />
+              <h3 className="font-serif text-lg font-bold text-stone-700 dark:text-slate-300">No Reflection Selected</h3>
+              <p className="text-xs text-stone-500 dark:text-slate-400 max-w-sm">
+                Write a new journal entry or choose one from the sidebar to begin your reflection session.
+              </p>
+              <button
+                id="empty-state-new-reflection-btn"
+                onClick={() => setIsComposing(true)}
+                className={`px-4 py-2 rounded-xl ${currentTheme.primaryBtn} text-xs font-semibold shadow-sm`}
+              >
+                Write New Reflection
+              </button>
             </div>
-          </main>
-        )}
+          )}
+        </main>
       </div>
 
-      {/* Notification Settings Modal */}
+      {/* Check-In Modal */}
+      {activeExperiment && (
+        <CheckInModal
+          isOpen={checkInModalOpen}
+          onClose={() => setCheckInModalOpen(false)}
+          experiment={activeExperiment}
+          initialOutcome={initialCheckInOutcome}
+          onSubmit={handleSubmitCheckIn}
+        />
+      )}
+
+      {/* Notification / Quiet Hours Modal */}
       <NotificationSettingsModal
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        settings={notificationSettings}
-        onSave={handleSaveNotificationPreferences}
+        isOpen={settingsModalOpen}
+        onClose={() => setSettingsModalOpen(false)}
+        settings={settings}
+        onSave={handleSaveSettings}
       />
     </div>
   );

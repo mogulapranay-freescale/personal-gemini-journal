@@ -1,7 +1,8 @@
 import React from 'react';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { LandingPage } from './components/LandingPage';
-import { Dashboard } from './components/Dashboard';
+import { AuthProvider, useAuth } from './context/AuthContext.tsx';
+import { ThemeProvider } from './context/ThemeContext.tsx';
+import { LandingPage } from './components/LandingPage.tsx';
+import { Dashboard } from './components/Dashboard.tsx';
 import { Sparkles } from 'lucide-react';
 
 const AppContent: React.FC = () => {
@@ -9,10 +10,13 @@ const AppContent: React.FC = () => {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-200">
-        <Sparkles className="w-8 h-8 text-indigo-400 animate-spin mb-4" />
-        <p className="text-sm font-medium text-slate-300">Initializing Gemini Reflection Journal...</p>
-        <p className="text-xs text-slate-500 mt-1">Connecting to Firebase & Cloud Firestore...</p>
+      <div className="min-h-screen bg-stone-50 dark:bg-slate-950 flex flex-col items-center justify-center text-stone-600 dark:text-slate-300 gap-3">
+        <div className="w-10 h-10 rounded-xl bg-emerald-800 dark:bg-emerald-700 flex items-center justify-center text-white animate-pulse shadow-md">
+          <Sparkles className="w-5 h-5 text-emerald-200" />
+        </div>
+        <div className="text-xs font-semibold tracking-wider text-stone-500 dark:text-slate-400 uppercase">
+          Loading Gemini Reflection...
+        </div>
       </div>
     );
   }
@@ -20,10 +24,14 @@ const AppContent: React.FC = () => {
   return user ? <Dashboard /> : <LandingPage />;
 };
 
-export default function App() {
+export const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <AppContent />
+      </AuthProvider>
+    </ThemeProvider>
   );
-}
+};
+
+export default App;

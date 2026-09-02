@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, setPersistence, browserLocalPersistence } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider } from 'firebase/auth';
+import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfigData from '../../firebase-applet-config.json';
 
 const firebaseConfig = {
@@ -13,15 +13,10 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase App
-const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+export const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
-// Initialize Firebase Authentication
+// Initialize Firebase Auth
 export const auth = getAuth(app);
-// Ensure persistence in browser environment
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.warn('Firebase persistence setup notice:', err);
-});
-
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
   prompt: 'select_account',
@@ -32,4 +27,15 @@ const databaseId = (import.meta.env.VITE_FIREBASE_DATABASE_ID || firebaseConfigD
 
 export const db = getFirestore(app, databaseId);
 
-export default app;
+// Connection test helper
+export async function testFirestoreConnection(): Promise<boolean> {
+  try {
+    await getDocFromServer(doc(db, 'test', 'connection'));
+    return true;
+  } catch (error) {
+    if (error instanceof Error && error.message.includes('the client is offline')) {
+      console.warn('Firestore is currently operating offline or connecting...');
+    }
+    return false;
+  }
+}

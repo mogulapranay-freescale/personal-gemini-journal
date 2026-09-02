@@ -1,220 +1,165 @@
 import {
-  GrowthExperiment,
-  JournalReflection,
+  Experiment,
+  CheckIn,
+  MomentumState,
   NotificationSettings,
-  GrowthGuardianStatus,
-  GrowthGuardianState,
-} from '../types';
+  Reflection,
+} from '../types.ts';
 
-/**
- * Derives a bite-sized, single-day action from the active experiment
- */
-export function deriveTodayAction(experiment: GrowthExperiment | null): string {
-  if (!experiment || !experiment.action) {
-    return 'Take 5 minutes to write down your top priority for today.';
-  }
-
-  const raw = experiment.action.trim();
-
-  // Pattern replacements for specific daily execution
-  if (/three\s+(\d+)-minute/i.test(raw)) {
-    const match = raw.match(/three\s+(\d+)-minute/i);
-    return `Complete one ${match ? match[1] : '25'}-minute focus block on your primary objective.`;
-  }
-  if (/two\s+(\d+)-minute/i.test(raw)) {
-    const match = raw.match(/two\s+(\d+)-minute/i);
-    return `Complete one ${match ? match[1] : '30'}-minute session today.`;
-  }
-  if (/^Complete\s+(\d+)\s+/i.test(raw)) {
-    return raw.replace(/^Complete\s+\d+\s+/i, 'Complete one ');
-  }
-  if (raw.toLowerCase().includes('cloud run')) {
-    return 'Complete one 30-minute Cloud Run session.';
-  }
-  if (raw.length > 80) {
-    return raw.slice(0, 80) + '...';
-  }
-  return raw;
+export interface GuardianAssessment {
+  momentumState: MomentumState;
+  score: number; // 0 - 100
+  recommendation: string;
+  isStalled: boolean;
+  needsAdaptation: boolean;
+  consecutiveSkips: number;
+  recentCompletionRate: number;
+  reflectionStreak: number;
 }
 
-export function evaluateGrowthGuardian(
-  reflections: JournalReflection[],
-  experiment: GrowthExperiment | null,
-  settings: NotificationSettings | null
-): GrowthGuardianStatus {
-  const todayAction = deriveTodayAction(experiment);
+/**
+ * Calculates reflection streak
+ */
+export function calculateReflectionStreak(reflections: Reflection[]): number {
+  if (!reflections || reflections.length === 0) return 0;
 
-  // If no experiment exists yet
-  if (!experiment) {
-    if (reflections.length === 0) {
-      return {
-        state: 'idle',
-        headline: 'Growth Guardian Ready',
-        message: 'Record your first reflection to initialize your personal growth accountability loop.',
-        notificationType: 'MISSED_REFLECTION',
-        skipCount: 0,
-        completionCount: 0,
-        needsAdaptation: false,
-        todayAction: 'Write a 3-minute initial reflection on what matters most to you.',
-        evidenceExplanation: 'Awaiting your first journal entry to analyze behavioral patterns.',
-        contextPrompt: 'Daily Reflection Check-in: Starting my growth journal practice.',
-      };
+  const dates = Array.from(
+    new Set(
+      reflections.map(r => new Date(r.createdAt).toISOString().split('T')[0])
+    )
+  ).sort().reverse();
+
+  if (dates.length === 0) return 0;
+
+  const today = new Date().toISOString().split('T')[0];
+  const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+
+  const mostRecent = dates[0];
+  if (mostRecent !== today && mostRecent !== yesterday) {
+    return 0; // streak broken
+  }
+
+  let streak = 1;
+  let curr = new Date(mostRecent);
+
+  for (let i = 1; i < dates.length; i++) {
+    const prevDate = new Date(dates[i]);
+    const diffDays = Math.round((curr.getTime() - prevDate.getTime()) / (1000 * 3600 * 24));
+    if (diffDays === 1) {
+      streak++;
+      curr = prevDate;
+    } else {
+      break;
     }
+  }
 
-    const todayStr = new Date().toISOString().slice(0, 10);
-    const journaledToday = reflections.some((r) => (r.createdAt || r.updatedAt || '').slice(0, 10) === todayStr);
+  return streak;
+}
 
-    if (!journaledToday) {
-      return {
-        state: 'needs_attention',
-        headline: 'Your reflection space is waiting',
-        message: "You haven't recorded a reflection today. Take a quick moment to clear your mind and log your thoughts.",
-        notificationType: 'MISSED_REFLECTION',
-        skipCount: 0,
-        completionCount: 0,
-        needsAdaptation: false,
-        todayAction: 'Log 1 quick entry in your reflection journal today.',
-        evidenceExplanation: `You have ${reflections.length} total entries, but none logged yet today.`,
-        contextPrompt: 'Daily Reflection Check-in: What went well, what challenged me, and what I learned today:',
-      };
+/**
+ * Comprehensive Growth Guardian momentum analysis
+ */
+export function assessGrowthMomentum(
+  activeExperiment: Experiment | null,
+  recentCheckIns: CheckIn[],
+  reflections: Reflection[]
+): GuardianAssessment {
+  const reflectionStreak = calculateReflectionStreak(reflections);
+
+  if (!activeExperiment) {
+    return {
+      momentumState: reflectionStreak > 0 ? 'building' : 'needs_attention',
+      score: Math.min(reflectionStreak * 20, 60),
+      recommendation: 'Choose or generate a 7-day micro-experiment to turn your journal reflections into daily action.',
+      isStalled: false,
+      needsAdaptation: false,
+      consecutiveSkips: 0,
+      recentCompletionRate: 0,
+      reflectionStreak,
+    };
+  }
+
+  // Filter checkins for this experiment
+  const expCheckins = recentCheckIns
+    .filter(c => c.experimentId === activeExperiment.id)
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+  // Count consecutive recent skips
+  let consecutiveSkips = 0;
+  for (const c of expCheckins) {
+    if (c.outcome === 'skipped') {
+      consecutiveSkips++;
+    } else {
+      break;
     }
-
-    return {
-      state: 'building_momentum',
-      headline: 'Building Initial Momentum',
-      message: `You've recorded ${reflections.length} reflection entries. Select a Growth Focus to unlock targeted daily accountability.`,
-      notificationType: 'POSITIVE_MOMENTUM',
-      skipCount: 0,
-      completionCount: 0,
-      needsAdaptation: false,
-      todayAction: 'Select or start your first growth experiment.',
-      evidenceExplanation: 'Reflections are active; establishing an experiment will measure concrete progress.',
-    };
   }
 
-  // Calculate skip count, completion count, and history analysis
-  let skipCount = experiment.skipCount ?? 0;
-  let completionCount = experiment.completionCount ?? 0;
+  // Last 5 checkins rate
+  const last5 = expCheckins.slice(0, 5);
+  const doneCount = last5.filter(c => c.outcome === 'done').length;
+  const partialCount = last5.filter(c => c.outcome === 'partially_done').length;
+  const effectiveRate = last5.length > 0 ? (doneCount + partialCount * 0.5) / last5.length : 0.5;
 
-  const history = experiment.history || [];
-  const recentHistory = history.slice(-7);
-  const calculatedSkips = recentHistory.filter((h) => h.status === 'skipped').length;
-  const calculatedCompletions = recentHistory.filter((h) => h.status === 'completed').length;
-  const calculatedPartials = recentHistory.filter((h) => h.status === 'in_progress').length;
+  const isStalled = consecutiveSkips >= 2 || (last5.length >= 3 && effectiveRate < 0.35);
+  const needsAdaptation = isStalled || consecutiveSkips >= 2;
 
-  if (calculatedSkips > skipCount) skipCount = calculatedSkips;
-  if (calculatedCompletions > completionCount) completionCount = calculatedCompletions;
+  let momentumState: MomentumState = 'healthy';
+  let recommendation = 'Your momentum is strong! Keep building on this consistent rhythm.';
+  let score = 85;
 
-  if (experiment.status === 'skipped' && skipCount === 0) skipCount = 1;
-  if (experiment.status === 'completed' && completionCount === 0) completionCount = 1;
-
-  // Days since last update
-  const lastUpdate = new Date(experiment.updatedAt || experiment.createdAt || Date.now());
-  const now = new Date();
-  const diffDays = Math.floor((now.getTime() - lastUpdate.getTime()) / (1000 * 60 * 60 * 24));
-
-  const todayStr = now.toISOString().slice(0, 10);
-  const journaledToday = reflections.some((r) => (r.createdAt || r.updatedAt || '').slice(0, 10) === todayStr);
-  const checkedInToday = history.some((h) => h.date === todayStr);
-
-  const shortAction = experiment.action.replace(/^Complete\s+/i, '').replace(/^Study\s+/i, '');
-
-  // 1. ADAPTIVE PLAN RECOVERY (>= 2 skips or repeated friction)
-  if (skipCount >= 2 || experiment.status === 'skipped') {
-    return {
-      state: 'plan_adaptation_recommended',
-      headline: 'Adaptive Plan Recovery',
-      message: `The current plan appears too difficult or has been repeatedly skipped (${skipCount >= 2 ? `${skipCount} times` : 'recently'}). Rather than increasing pressure, Growth Guardian recommends a smaller 15-minute version.`,
-      notificationType: 'PLAN_ADAPTATION',
-      skipCount,
-      completionCount,
-      needsAdaptation: true,
-      todayAction: `Complete a lightweight 15-minute micro-session on ${shortAction || 'your key priority'}.`,
-      evidenceExplanation: `Repeated skips (${skipCount}) indicate friction with the current scope. Downsizing restores consistency.`,
-      adaptedSuggestion: {
-        action: `Spend 15 minutes reviewing ${shortAction || 'your key priority'} (3x/week)`,
-        targetFrequency: '3 micro-sessions (15 mins each)',
-        timeframe: 'Next 7 days',
-        rationale: `Derived from your reflection logs: breaking high-friction commitments into shorter 15-minute intervals reduces barrier to entry and restores momentum.`,
-      },
-      contextPrompt: `Growth Check-in: I'm adjusting my growth experiment "${experiment.action}" to a lighter 15-minute routine to overcome current friction. Here is how I plan to restart:`,
-    };
-  }
-
-  // 2. STALLED (No check-ins/updates for > 3 days)
-  if (diffDays >= 3 && !checkedInToday && completionCount === 0) {
-    return {
-      state: 'stalled',
-      headline: 'Stalled',
-      message: `The current plan appears too difficult or has been repeatedly skipped. A short 10-minute check-in can reactivate your habit.`,
-      notificationType: 'EXPERIMENT_DUE',
-      skipCount,
-      completionCount,
-      needsAdaptation: false,
-      todayAction: `Spend 10 minutes restarting "${todayAction}".`,
-      evidenceExplanation: `No check-ins recorded over the last ${diffDays} days.`,
-      contextPrompt: `Growth Check-in: Re-engaging with my experiment "${experiment.action}". Here is what got in the way and how I'm restarting:`,
-    };
-  }
-
-  // 3. RECOVERING (Recent partials or adapted plan in progress)
-  if (calculatedPartials > 0 && skipCount <= 1 && experiment.status === 'in_progress') {
-    return {
-      state: 'recovering',
-      headline: 'Recovering',
-      message: `You've restarted after a period of low activity. Focus on rebuilding consistency.`,
-      notificationType: 'RECOVERING_MOMENTUM',
-      skipCount,
-      completionCount,
-      needsAdaptation: false,
-      todayAction,
-      evidenceExplanation: 'Recent check-ins show steady re-engagement after previous challenges.',
-      contextPrompt: `Growth Check-in: Tracking recovery momentum on "${experiment.action}":`,
-    };
-  }
-
-  // 4. HEALTHY MOMENTUM (Completions logged or active streak with check-ins)
-  if (experiment.status === 'completed' || completionCount >= 2 || (checkedInToday && experiment.status === 'in_progress')) {
-    return {
-      state: 'healthy_momentum',
-      headline: 'Healthy Momentum',
-      message: `You're consistently following through on your current experiment.`,
-      notificationType: 'POSITIVE_MOMENTUM',
-      skipCount,
-      completionCount,
-      needsAdaptation: false,
-      todayAction,
-      evidenceExplanation: 'Your recent reflections indicate consistent progress toward this goal.',
-      contextPrompt: `Growth Check-in: Sharing my progress and breakthroughs on "${experiment.action}":`,
-    };
-  }
-
-  // 5. BUILDING MOMENTUM / NEEDS ATTENTION
-  if (!checkedInToday && !journaledToday) {
-    return {
-      state: 'needs_attention',
-      headline: 'Needs Attention',
-      message: `Your recent entries suggest some friction. A short check-in may help.`,
-      notificationType: 'EXPERIMENT_DUE',
-      skipCount,
-      completionCount,
-      needsAdaptation: false,
-      todayAction,
-      evidenceExplanation: 'No check-in or reflection recorded for today yet.',
-      contextPrompt: `Growth Check-in: Updating progress on experiment "${experiment.action}". Here is what I accomplished today:`,
-    };
+  if (needsAdaptation) {
+    momentumState = 'stalled';
+    score = 35;
+    recommendation = `We noticed high friction with "${activeExperiment.title}". Let's downsize this to a 15-minute micro-habit to restore ease and consistency.`;
+  } else if (effectiveRate < 0.6 || reflectionStreak === 0) {
+    momentumState = 'needs_attention';
+    score = 60;
+    recommendation = 'You are making progress, but encountering minor friction. Try checking in right after your focus session today.';
+  } else if (activeExperiment.completedDays >= 5) {
+    momentumState = 'healthy';
+    score = 95;
+    recommendation = `Outstanding execution! You've completed ${activeExperiment.completedDays}/${activeExperiment.targetDays} days. You are ready to lock in this habit.`;
+  } else {
+    momentumState = 'building';
+    score = 75;
+    recommendation = 'Solid foundational effort. Focus on completing today’s micro-step with zero pressure for perfection.';
   }
 
   return {
-    state: 'building_momentum',
-    headline: 'Building Momentum',
-    message: `You're establishing a consistent rhythm. Keep the next action small.`,
-    notificationType: 'POSITIVE_MOMENTUM',
-    skipCount,
-    completionCount,
-    needsAdaptation: false,
-    todayAction,
-    evidenceExplanation: 'Experiment is active and tracking your daily habits.',
-    contextPrompt: `Growth Check-in: Mid-week progress update on "${experiment.action}":`,
+    momentumState,
+    score,
+    recommendation,
+    isStalled,
+    needsAdaptation,
+    consecutiveSkips,
+    recentCompletionRate: Math.round(effectiveRate * 100),
+    reflectionStreak,
   };
+}
+
+/**
+ * Check if the current time falls in user quiet hours
+ */
+export function isCurrentlyQuietHours(settings: NotificationSettings): boolean {
+  if (!settings.enabled) return true;
+
+  // Check snooze
+  if (settings.snoozedUntil) {
+    const snoozeTime = new Date(settings.snoozedUntil).getTime();
+    if (Date.now() < snoozeTime) {
+      return true;
+    }
+  }
+
+  const currentHour = new Date().getHours();
+  const start = settings.quietHoursStart; // e.g. 22
+  const end = settings.quietHoursEnd; // e.g. 8
+
+  if (start > end) {
+    // Overnight quiet hours: 22 to 8
+    return currentHour >= start || currentHour < end;
+  } else {
+    // Same day quiet hours
+    return currentHour >= start && currentHour < end;
+  }
 }

@@ -2,15 +2,23 @@ import {
   collection,
   doc,
   setDoc,
+  updateDoc,
+  deleteDoc,
   getDocs,
   getDoc,
-  deleteDoc,
   query,
   orderBy,
   onSnapshot,
+  Unsubscribe,
 } from 'firebase/firestore';
-import { db, auth } from './firebase';
-import { JournalReflection, ChatMessage } from '../types';
+import { db, auth } from './firebase.ts';
+import {
+  Reflection,
+  Experiment,
+  CheckIn,
+  NotificationSettings,
+  WeeklyReview,
+} from '../types.ts';
 
 export enum OperationType {
   CREATE = 'create',
@@ -30,376 +38,242 @@ export interface FirestoreErrorInfo {
     email?: string | null;
     emailVerified?: boolean | null;
     isAnonymous?: boolean | null;
-    tenantId?: string | null;
-    providerInfo?: {
-      providerId?: string | null;
-      email?: string | null;
-    }[];
   };
 }
 
-export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): Error {
+export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null): never {
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData?.map((provider) => ({
-        providerId: provider.providerId,
-        email: provider.email,
-      })) || [],
+      userId: auth.currentUser?.uid || null,
+      email: auth.currentUser?.email || null,
+      emailVerified: auth.currentUser?.emailVerified || null,
+      isAnonymous: auth.currentUser?.isAnonymous || null,
     },
     operationType,
     path,
   };
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  return new Error(JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
 }
 
 /**
- * Strips undefined properties recursively so Firestore does not reject writes
+ * Strict Undefined-Stripping (Zero-Crash Payload Hygiene)
  */
-export function sanitizeForFirestore<T extends Record<string, any>>(obj: T): T {
-  return JSON.parse(
-    JSON.stringify(obj, (key, value) => (value === undefined ? null : value))
-  );
+export function sanitizeForFirestore<T extends Record<string, unknown>>(data: T): T {
+  const cleaned: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (value !== undefined) {
+      if (value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Date)) {
+        cleaned[key] = sanitizeForFirestore(value as Record<string, unknown>);
+      } else if (Array.isArray(value)) {
+        cleaned[key] = value.filter(item => item !== undefined);
+      } else {
+        cleaned[key] = value;
+      }
+    }
+  }
+  return cleaned as T;
 }
 
-/**
- * Creates or updates a journal reflection document in the user's isolated subcollection:
- * /users/{userId}/reflections/{reflectionId}
- */
-export async function saveJournalReflection(
-  userId: string,
-  reflection: JournalReflection
-): Promise<void> {
-  if (!userId) throw new Error('User ID is required to save reflection');
+// ================= REFLECTIONS =================
+
+export async function saveReflection(userId: string, reflection: Reflection): Promise<void> {
   const path = `users/${userId}/reflections/${reflection.id}`;
   try {
-    const sanitized = sanitizeForFirestore({
-      ...reflection,
-      updatedAt: new Date().toISOString(),
-    });
-    const docRef = doc(db, 'users', userId, 'reflections', reflection.id);
-    await setDoc(docRef, sanitized, { merge: true });
+    const sanitized = sanitizeForFirestore(reflection as unknown as Record<string, unknown>);
+    await setDoc(doc(db, 'users', userId, 'reflections', reflection.id), sanitized);
   } catch (error) {
-    throw handleFirestoreError(error, OperationType.WRITE, path);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
-/**
- * Saves a multi-turn chat message within a reflection:
- * /users/{userId}/reflections/{reflectionId}/messages/{messageId}
- */
-export async function saveReflectionMessage(
-  userId: string,
-  reflectionId: string,
-  message: ChatMessage
-): Promise<void> {
-  if (!userId || !reflectionId) throw new Error('User ID and Reflection ID are required');
-  const path = `users/${userId}/reflections/${reflectionId}/messages/${message.id}`;
-  try {
-    const sanitized = sanitizeForFirestore(message);
-    const msgRef = doc(
-      db,
-      'users',
-      userId,
-      'reflections',
-      reflectionId,
-      'messages',
-      message.id
-    );
-    await setDoc(msgRef, sanitized);
-  } catch (error) {
-    throw handleFirestoreError(error, OperationType.WRITE, path);
-  }
-}
-
-/**
- * Deletes a journal reflection
- */
-export async function deleteJournalReflection(
-  userId: string,
-  reflectionId: string
-): Promise<void> {
-  if (!userId || !reflectionId) throw new Error('User ID and Reflection ID are required');
+export async function updateReflection(userId: string, reflectionId: string, updates: Partial<Reflection>): Promise<void> {
   const path = `users/${userId}/reflections/${reflectionId}`;
   try {
-    const docRef = doc(db, 'users', userId, 'reflections', reflectionId);
-    await deleteDoc(docRef);
+    const sanitized = sanitizeForFirestore({ ...updates, updatedAt: new Date().toISOString() });
+    await updateDoc(doc(db, 'users', userId, 'reflections', reflectionId), sanitized);
   } catch (error) {
-    throw handleFirestoreError(error, OperationType.DELETE, path);
+    handleFirestoreError(error, OperationType.UPDATE, path);
   }
 }
 
-/**
- * Fetches all reflections for the authenticated user
- */
-export async function fetchUserReflections(userId: string): Promise<JournalReflection[]> {
-  if (!userId) return [];
+export async function deleteReflection(userId: string, reflectionId: string): Promise<void> {
+  const path = `users/${userId}/reflections/${reflectionId}`;
+  try {
+    await deleteDoc(doc(db, 'users', userId, 'reflections', reflectionId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+}
+
+export function subscribeToReflections(
+  userId: string,
+  onUpdate: (reflections: Reflection[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
   const path = `users/${userId}/reflections`;
   try {
-    const collRef = collection(db, 'users', userId, 'reflections');
-    const q = query(collRef, orderBy('updatedAt', 'desc'));
-    const snap = await getDocs(q);
-    const list: JournalReflection[] = [];
-    snap.forEach((d) => {
-      list.push(d.data() as JournalReflection);
-    });
-    return list;
-  } catch (error) {
-    throw handleFirestoreError(error, OperationType.GET, path);
-  }
-}
-
-/**
- * Subscribes to realtime updates of reflections for the current authenticated user
- */
-export function subscribeUserReflections(
-  userId: string,
-  callback: (reflections: JournalReflection[]) => void,
-  onError?: (err: Error) => void
-) {
-  if (!userId) return () => {};
-  const path = `users/${userId}/reflections`;
-  const collRef = collection(db, 'users', userId, 'reflections');
-  const q = query(collRef, orderBy('updatedAt', 'desc'));
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const results: JournalReflection[] = [];
-      snapshot.forEach((docSnap) => {
-        results.push(docSnap.data() as JournalReflection);
-      });
-      callback(results);
-    },
-    (err) => {
-      const wrappedError = handleFirestoreError(err, OperationType.GET, path);
-      if (onError) onError(wrappedError);
-    }
-  );
-}
-
-/**
- * Subscribes to realtime chat messages in a specific reflection
- */
-export function subscribeReflectionMessages(
-  userId: string,
-  reflectionId: string,
-  callback: (messages: ChatMessage[]) => void,
-  onError?: (err: Error) => void
-) {
-  if (!userId || !reflectionId) return () => {};
-  const path = `users/${userId}/reflections/${reflectionId}/messages`;
-  const collRef = collection(
-    db,
-    'users',
-    userId,
-    'reflections',
-    reflectionId,
-    'messages'
-  );
-  const q = query(collRef, orderBy('timestamp', 'asc'));
-
-  return onSnapshot(
-    q,
-    (snapshot) => {
-      const results: ChatMessage[] = [];
-      snapshot.forEach((docSnap) => {
-        results.push(docSnap.data() as ChatMessage);
-      });
-      callback(results);
-    },
-    (err) => {
-      const wrappedError = handleFirestoreError(err, OperationType.GET, path);
-      if (onError) onError(wrappedError);
-    }
-  );
-}
-
-/**
- * Saves current Growth Experiment for the authenticated user
- * /users/{userId}/growth/current
- */
-export async function saveGrowthExperiment(
-  userId: string,
-  experiment: import('../types').GrowthExperiment
-): Promise<void> {
-  if (!userId) throw new Error('User ID is required');
-  const path = `users/${userId}/growth/current`;
-  try {
-    const sanitized = sanitizeForFirestore({
-      ...experiment,
-      updatedAt: new Date().toISOString(),
-    });
-    const docRef = doc(db, 'users', userId, 'growth', 'current');
-    await setDoc(docRef, sanitized, { merge: true });
-  } catch (error) {
-    throw handleFirestoreError(error, OperationType.WRITE, path);
-  }
-}
-
-/**
- * Fetches current Growth Experiment
- */
-export async function fetchGrowthExperiment(
-  userId: string
-): Promise<import('../types').GrowthExperiment | null> {
-  if (!userId) return null;
-  const path = `users/${userId}/growth/current`;
-  try {
-    const docRef = doc(db, 'users', userId, 'growth', 'current');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return snap.data() as import('../types').GrowthExperiment;
-    }
-    return null;
-  } catch (error) {
-    throw handleFirestoreError(error, OperationType.GET, path);
-  }
-}
-
-/**
- * Subscribes to realtime updates of user's active Growth Experiment
- */
-export function subscribeGrowthExperiment(
-  userId: string,
-  callback: (experiment: import('../types').GrowthExperiment | null) => void,
-  onError?: (err: Error) => void
-) {
-  if (!userId) return () => {};
-  const path = `users/${userId}/growth/current`;
-  const docRef = doc(db, 'users', userId, 'growth', 'current');
-
-  return onSnapshot(
-    docRef,
-    (docSnap) => {
-      if (docSnap.exists()) {
-        callback(docSnap.data() as import('../types').GrowthExperiment);
-      } else {
-        callback(null);
+    const q = query(collection(db, 'users', userId, 'reflections'), orderBy('createdAt', 'desc'));
+    return onSnapshot(
+      q,
+      snapshot => {
+        const list = snapshot.docs.map(d => d.data() as Reflection);
+        onUpdate(list);
+      },
+      error => {
+        if (onError) onError(error instanceof Error ? error : new Error(String(error)));
+        handleFirestoreError(error, OperationType.LIST, path);
       }
-    },
-    (err) => {
-      const wrappedError = handleFirestoreError(err, OperationType.GET, path);
-      if (onError) onError(wrappedError);
-    }
-  );
-}
-
-/**
- * Saves user notification & reminder settings
- * /users/{userId}/settings/notifications
- */
-export async function saveNotificationSettings(
-  userId: string,
-  settings: import('../types').NotificationSettings
-): Promise<void> {
-  if (!userId) throw new Error('User ID is required');
-  const path = `users/${userId}/settings/notifications`;
-  try {
-    const sanitized = sanitizeForFirestore(settings);
-    const docRef = doc(db, 'users', userId, 'settings', 'notifications');
-    await setDoc(docRef, sanitized, { merge: true });
+    );
   } catch (error) {
-    throw handleFirestoreError(error, OperationType.WRITE, path);
+    handleFirestoreError(error, OperationType.LIST, path);
   }
 }
 
-/**
- * Fetches user notification & reminder settings
- */
-export async function fetchNotificationSettings(
-  userId: string
-): Promise<import('../types').NotificationSettings | null> {
-  if (!userId) return null;
-  const path = `users/${userId}/settings/notifications`;
+// ================= EXPERIMENTS =================
+
+export async function saveExperiment(userId: string, experiment: Experiment): Promise<void> {
+  const path = `users/${userId}/experiments/${experiment.id}`;
   try {
-    const docRef = doc(db, 'users', userId, 'settings', 'notifications');
-    const snap = await getDoc(docRef);
-    if (snap.exists()) {
-      return snap.data() as import('../types').NotificationSettings;
-    }
-    return null;
+    const sanitized = sanitizeForFirestore(experiment as unknown as Record<string, unknown>);
+    await setDoc(doc(db, 'users', userId, 'experiments', experiment.id), sanitized);
   } catch (error) {
-    throw handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
-/**
- * Subscribes to realtime updates of notification settings
- */
-export function subscribeNotificationSettings(
+export async function updateExperiment(userId: string, experimentId: string, updates: Partial<Experiment>): Promise<void> {
+  const path = `users/${userId}/experiments/${experimentId}`;
+  try {
+    const sanitized = sanitizeForFirestore({ ...updates, updatedAt: new Date().toISOString() });
+    await updateDoc(doc(db, 'users', userId, 'experiments', experimentId), sanitized);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.UPDATE, path);
+  }
+}
+
+export function subscribeToExperiments(
   userId: string,
-  callback: (settings: import('../types').NotificationSettings | null) => void,
+  onUpdate: (experiments: Experiment[]) => void,
   onError?: (err: Error) => void
-) {
-  if (!userId) return () => {};
-  const path = `users/${userId}/settings/notifications`;
-  const docRef = doc(db, 'users', userId, 'settings', 'notifications');
-
-  return onSnapshot(
-    docRef,
-    (docSnap) => {
-      if (docSnap.exists()) {
-        callback(docSnap.data() as import('../types').NotificationSettings);
-      } else {
-        callback(null);
+): Unsubscribe {
+  const path = `users/${userId}/experiments`;
+  try {
+    const q = query(collection(db, 'users', userId, 'experiments'), orderBy('createdAt', 'desc'));
+    return onSnapshot(
+      q,
+      snapshot => {
+        const list = snapshot.docs.map(d => d.data() as Experiment);
+        onUpdate(list);
+      },
+      error => {
+        if (onError) onError(error instanceof Error ? error : new Error(String(error)));
+        handleFirestoreError(error, OperationType.LIST, path);
       }
-    },
-    (err) => {
-      const wrappedError = handleFirestoreError(err, OperationType.GET, path);
-      if (onError) onError(wrappedError);
-    }
-  );
+    );
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
 }
 
-/**
- * Saves a Growth Check-In document
- * /users/{userId}/checkins/{checkinId}
- */
-export async function saveGrowthCheckIn(
-  userId: string,
-  checkIn: import('../types').GrowthCheckIn
-): Promise<void> {
-  if (!userId || !checkIn.id) throw new Error('User ID and CheckIn ID are required');
+// ================= CHECK-INS =================
+
+export async function saveCheckIn(userId: string, checkIn: CheckIn): Promise<void> {
   const path = `users/${userId}/checkins/${checkIn.id}`;
   try {
-    const sanitized = sanitizeForFirestore({
-      ...checkIn,
-      userId,
-      createdAt: checkIn.createdAt || new Date().toISOString(),
-    });
-    const docRef = doc(db, 'users', userId, 'checkins', checkIn.id);
-    await setDoc(docRef, sanitized, { merge: true });
+    const sanitized = sanitizeForFirestore(checkIn as unknown as Record<string, unknown>);
+    await setDoc(doc(db, 'users', userId, 'checkins', checkIn.id), sanitized);
   } catch (error) {
-    throw handleFirestoreError(error, OperationType.WRITE, path);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 }
 
-/**
- * Fetches user's past Growth Check-Ins
- */
-export async function fetchUserCheckIns(
-  userId: string
-): Promise<import('../types').GrowthCheckIn[]> {
-  if (!userId) return [];
+export function subscribeToCheckIns(
+  userId: string,
+  onUpdate: (checkIns: CheckIn[]) => void,
+  onError?: (err: Error) => void
+): Unsubscribe {
   const path = `users/${userId}/checkins`;
   try {
-    const collRef = collection(db, 'users', userId, 'checkins');
-    const q = query(collRef, orderBy('createdAt', 'desc'));
-    const snap = await getDocs(q);
-    const list: import('../types').GrowthCheckIn[] = [];
-    snap.forEach((d) => {
-      list.push(d.data() as import('../types').GrowthCheckIn);
-    });
-    return list;
+    const q = query(collection(db, 'users', userId, 'checkins'), orderBy('createdAt', 'desc'));
+    return onSnapshot(
+      q,
+      snapshot => {
+        const list = snapshot.docs.map(d => d.data() as CheckIn);
+        onUpdate(list);
+      },
+      error => {
+        if (onError) onError(error instanceof Error ? error : new Error(String(error)));
+        handleFirestoreError(error, OperationType.LIST, path);
+      }
+    );
   } catch (error) {
-    throw handleFirestoreError(error, OperationType.GET, path);
+    handleFirestoreError(error, OperationType.LIST, path);
   }
 }
 
+// ================= SETTINGS =================
+
+export const DEFAULT_SETTINGS: NotificationSettings = {
+  enabled: true,
+  guardianAlerts: true,
+  preferredHour: 20, // 8 PM
+  preferredMinute: 0,
+  frequency: 'daily',
+  quietHoursStart: 22, // 10 PM
+  quietHoursEnd: 8, // 8 AM
+  snoozedUntil: null,
+  updatedAt: new Date().toISOString(),
+};
+
+export async function getSettings(userId: string): Promise<NotificationSettings> {
+  const path = `users/${userId}/settings/notifications`;
+  try {
+    const snap = await getDoc(doc(db, 'users', userId, 'settings', 'notifications'));
+    if (snap.exists()) {
+      return { ...DEFAULT_SETTINGS, ...(snap.data() as NotificationSettings) };
+    }
+    return DEFAULT_SETTINGS;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.GET, path);
+  }
+}
+
+export async function saveSettings(userId: string, settings: Partial<NotificationSettings>): Promise<void> {
+  const path = `users/${userId}/settings/notifications`;
+  try {
+    const full = {
+      ...DEFAULT_SETTINGS,
+      ...settings,
+      updatedAt: new Date().toISOString(),
+    };
+    const sanitized = sanitizeForFirestore(full as unknown as Record<string, unknown>);
+    await setDoc(doc(db, 'users', userId, 'settings', 'notifications'), sanitized);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+// ================= WEEKLY REVIEWS =================
+
+export async function saveWeeklyReview(userId: string, review: WeeklyReview): Promise<void> {
+  const path = `users/${userId}/weeklyReviews/${review.id}`;
+  try {
+    const sanitized = sanitizeForFirestore(review as unknown as Record<string, unknown>);
+    await setDoc(doc(db, 'users', userId, 'weeklyReviews', review.id), sanitized);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+}
+
+export async function getWeeklyReviews(userId: string): Promise<WeeklyReview[]> {
+  const path = `users/${userId}/weeklyReviews`;
+  try {
+    const q = query(collection(db, 'users', userId, 'weeklyReviews'), orderBy('generatedAt', 'desc'));
+    const snap = await getDocs(q);
+    return snap.docs.map(d => d.data() as WeeklyReview);
+  } catch (error) {
+    handleFirestoreError(error, OperationType.LIST, path);
+  }
+}

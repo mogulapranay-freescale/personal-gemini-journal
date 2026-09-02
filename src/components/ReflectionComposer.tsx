@@ -1,220 +1,220 @@
 import React, { useState } from 'react';
-import { Sparkles, Send, Lightbulb, Compass, FileText, AlertCircle, RefreshCw } from 'lucide-react';
-import { ReflectionMode, JournalReflection, ChatMessage } from '../types';
+import {
+  Sparkles,
+  Tag,
+} from 'lucide-react';
+import { Mood } from '../types.ts';
+import { useTheme } from '../context/ThemeContext.tsx';
 
 interface ReflectionComposerProps {
-  currentReflection: JournalReflection | null;
-  initialPromptText?: string;
-  initialCategory?: JournalReflection['category'];
-  onSendMessage: (params: {
-    prompt: string;
-    mode: ReflectionMode;
+  onSaveAndAnalyze: (data: {
     title: string;
-    category: JournalReflection['category'];
+    content: string;
+    mood?: Mood;
+    tags: string[];
   }) => Promise<void>;
-  isGenerating: boolean;
-  error: string | null;
-  onRetry: () => void;
+  loading: boolean;
 }
 
+const INSPIRATION_PROMPTS = [
+  {
+    label: 'Daily Wrap-Up',
+    prompt: 'What was the single most meaningful accomplishment today, and what friction slowed you down?',
+  },
+  {
+    label: 'Focus & Energy',
+    prompt: 'Where did your energy peak and dip today? What triggered any mental fatigue or distraction?',
+  },
+  {
+    label: 'Conflict & Boundaries',
+    prompt: 'Did you say yes to something you wished you had declined? What boundary can you establish next time?',
+  },
+  {
+    label: 'Mindset & Growth',
+    prompt: 'What belief or fear held you back today, and what is the smallest low-risk action you can take to test it?',
+  },
+];
+
+const MOOD_OPTIONS: Array<{ value: Mood; label: string; icon: string }> = [
+  { value: 'energized', label: 'Energized', icon: '⚡' },
+  { value: 'calm', label: 'Calm', icon: '🍃' },
+  { value: 'thoughtful', label: 'Thoughtful', icon: '💭' },
+  { value: 'grateful', label: 'Grateful', icon: '🙏' },
+  { value: 'curious', label: 'Curious', icon: '🔍' },
+  { value: 'frustrated', label: 'Frustrated', icon: '⚠️' },
+  { value: 'overwhelmed', label: 'Overwhelmed', icon: '🌊' },
+  { value: 'restless', label: 'Restless', icon: '🔄' },
+];
+
 export const ReflectionComposer: React.FC<ReflectionComposerProps> = ({
-  currentReflection,
-  initialPromptText,
-  initialCategory,
-  onSendMessage,
-  isGenerating,
-  error,
-  onRetry,
+  onSaveAndAnalyze,
+  loading,
 }) => {
-  const [prompt, setPrompt] = useState(initialPromptText || '');
-  const [title, setTitle] = useState(currentReflection?.title || '');
-  const [category, setCategory] = useState<JournalReflection['category']>(
-    initialCategory || currentReflection?.category || 'Daily Log'
-  );
-  const [mode, setMode] = useState<ReflectionMode>('reflect');
+  const { currentTheme } = useTheme();
+  const [title, setTitle] = useState('');
+  const [content, setContent] = useState('');
+  const [mood, setMood] = useState<Mood | undefined>(undefined);
+  const [tagInput, setTagInput] = useState('');
+  const [tags, setTags] = useState<string[]>(['Growth', 'Daily']);
 
-  // Sync title, prompt, and category when active reflection or initial props change
-  React.useEffect(() => {
-    if (currentReflection) {
-      setTitle(currentReflection.title);
-      setCategory(currentReflection.category);
-    } else {
-      setTitle('');
-      if (initialCategory) setCategory(initialCategory);
-      else setCategory('Daily Log');
-      if (initialPromptText) setPrompt(initialPromptText);
-    }
-  }, [currentReflection?.id, initialPromptText, initialCategory]);
-
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!prompt.trim() || isGenerating) return;
-
-    const activeTitle = title.trim() || (prompt.slice(0, 40) + '...');
-    const messagePrompt = prompt.trim();
-    
-    // Clear prompt immediately for responsive feel, but preserve inputs on error
-    setPrompt('');
-    
-    try {
-      await onSendMessage({
-        prompt: messagePrompt,
-        mode,
-        title: activeTitle,
-        category,
-      });
-    } catch {
-      // Restore prompt if failed
-      setPrompt(messagePrompt);
+  const handleAddTag = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && tagInput.trim()) {
+      e.preventDefault();
+      if (!tags.includes(tagInput.trim())) {
+        setTags([...tags, tagInput.trim()]);
+      }
+      setTagInput('');
     }
   };
 
-  const isFollowUp = Boolean(currentReflection && currentReflection.turnCount > 0);
+  const handleRemoveTag = (tagToRemove: string) => {
+    setTags(tags.filter(t => t !== tagToRemove));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!content.trim()) return;
+
+    await onSaveAndAnalyze({
+      title: title.trim() || 'Daily Reflection',
+      content: content.trim(),
+      mood,
+      tags,
+    });
+  };
+
+  const applyPrompt = (promptText: string) => {
+    if (content.trim()) {
+      setContent(prev => `${prev}\n\n${promptText}`);
+    } else {
+      setContent(promptText);
+    }
+  };
+
+  const wordCount = content.trim() ? content.trim().split(/\s+/).length : 0;
 
   return (
-    <div id="reflection-composer" className="w-full bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 sm:p-5 shadow-xl backdrop-blur-md">
-      {error && (
-        <div className="mb-4 p-3 bg-rose-950/80 border border-rose-800 rounded-xl text-rose-200 text-xs flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
-            <span>{error}</span>
-          </div>
-          <button
-            onClick={onRetry}
-            className="px-2.5 py-1 bg-rose-800 hover:bg-rose-700 text-white rounded text-xs font-medium flex items-center gap-1 shrink-0"
-          >
-            <RefreshCw className="w-3 h-3" />
-            Retry
-          </button>
-        </div>
-      )}
+    <div className="max-w-3xl mx-auto p-4 sm:p-6 space-y-6">
+      <div className="flex flex-col gap-1">
+        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-stone-900 dark:text-slate-100">
+          New Journal Reflection
+        </h1>
+        <p className="text-sm text-stone-500 dark:text-slate-400">
+          Write down your thoughts, wins, and obstacles. Gemini will synthesize key patterns and propose right-sized action steps.
+        </p>
+      </div>
 
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {/* Title and Category for new entries */}
-        {!isFollowUp && (
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">
-              <label htmlFor="reflection-title-input" className="block text-xs font-medium text-slate-300 mb-1">
-                Entry Title / Topic
-              </label>
-              <input
-                id="reflection-title-input"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Planning my quarterly roadmap, Overcoming self-doubt..."
-                disabled={isGenerating}
-                className="w-full bg-slate-900/90 border border-slate-700 focus:border-indigo-500 rounded-xl px-3.5 py-2 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors"
-              />
-            </div>
-            <div>
-              <label htmlFor="reflection-category-select" className="block text-xs font-medium text-slate-300 mb-1">
-                Category
-              </label>
-              <select
-                id="reflection-category-select"
-                value={category}
-                onChange={(e) => setCategory(e.target.value as any)}
-                disabled={isGenerating}
-                className="w-full bg-slate-900/90 border border-slate-700 focus:border-indigo-500 rounded-xl px-3 py-2 text-sm text-slate-100 focus:outline-none transition-colors"
+      {/* Inspiration Prompts Bar */}
+      <div className={`p-3.5 rounded-xl ${currentTheme.accentBg} border ${currentTheme.accentBorder} space-y-2`}>
+        <div className={`flex items-center gap-1.5 text-xs font-semibold ${currentTheme.accentText}`}>
+          <Sparkles className="w-3.5 h-3.5" />
+          <span>Need a spark? Click a reflection inquiry:</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {INSPIRATION_PROMPTS.map((item, idx) => (
+            <button
+              key={idx}
+              type="button"
+              onClick={() => applyPrompt(item.prompt)}
+              className="text-xs px-2.5 py-1 rounded-lg bg-white/90 dark:bg-slate-800/90 hover:bg-white dark:hover:bg-slate-800 border border-stone-200/80 dark:border-slate-700 text-stone-700 dark:text-slate-200 hover:text-stone-900 dark:hover:text-white transition-colors shadow-2xs font-medium"
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-4">
+        {/* Title Input */}
+        <div>
+          <input
+            id="reflection-title-input"
+            type="text"
+            placeholder="Reflection Title (e.g. Navigating Team Handoff Friction)..."
+            value={title}
+            onChange={e => setTitle(e.target.value)}
+            className={`w-full px-4 py-2.5 text-lg font-serif font-medium rounded-xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-stone-900 dark:text-slate-100 placeholder-stone-400 dark:placeholder-slate-500 focus:outline-hidden focus:ring-2 ${currentTheme.ringClass} shadow-2xs`}
+          />
+        </div>
+
+        {/* Mood Selector */}
+        <div>
+          <label className="block text-xs font-semibold text-stone-600 dark:text-slate-400 mb-1.5">
+            How are you feeling right now?
+          </label>
+          <div className="flex flex-wrap gap-1.5">
+            {MOOD_OPTIONS.map(m => (
+              <button
+                key={m.value}
+                type="button"
+                onClick={() => setMood(mood === m.value ? undefined : m.value)}
+                className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium transition-all ${
+                  mood === m.value
+                    ? `${currentTheme.primaryBtn} shadow-xs`
+                    : 'bg-white dark:bg-slate-900 border border-stone-200 dark:border-slate-700 text-stone-700 dark:text-slate-300 hover:bg-stone-50 dark:hover:bg-slate-800'
+                }`}
               >
-                <option value="Daily Log">Daily Log</option>
-                <option value="Deep Reflection">Deep Reflection</option>
-                <option value="Idea Brainstorm">Idea Brainstorm</option>
-                <option value="Work & Focus">Work & Focus</option>
-                <option value="Mindfulness">Mindfulness</option>
-              </select>
-            </div>
+                <span>{m.icon}</span>
+                <span>{m.label}</span>
+              </button>
+            ))}
           </div>
-        )}
-
-        {/* Mode Selector Tabs */}
-        <div className="flex items-center gap-2 pt-1">
-          <span className="text-xs text-slate-400 font-medium mr-1">AI Focus:</span>
-          <button
-            type="button"
-            onClick={() => setMode('reflect')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-              mode === 'reflect'
-                ? 'bg-indigo-600 text-white shadow-sm shadow-indigo-600/30'
-                : 'bg-slate-900/60 text-slate-300 hover:bg-slate-700/60'
-            }`}
-          >
-            <Compass className="w-3.5 h-3.5" />
-            Reflect & Clarify
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('brainstorm')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-              mode === 'brainstorm'
-                ? 'bg-violet-600 text-white shadow-sm shadow-violet-600/30'
-                : 'bg-slate-900/60 text-slate-300 hover:bg-slate-700/60'
-            }`}
-          >
-            <Lightbulb className="w-3.5 h-3.5" />
-            Brainstorm Ideas
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('summarize')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-              mode === 'summarize'
-                ? 'bg-sky-600 text-white shadow-sm shadow-sky-600/30'
-                : 'bg-slate-900/60 text-slate-300 hover:bg-slate-700/60'
-            }`}
-          >
-            <FileText className="w-3.5 h-3.5" />
-            Synthesize
-          </button>
         </div>
 
-        {/* Prompt Text Area */}
+        {/* Content Area */}
         <div className="relative">
           <textarea
-            id="reflection-prompt-textarea"
-            rows={isFollowUp ? 3 : 4}
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder={
-              isFollowUp
-                ? 'Add follow-up thoughts or ask Gemini for deeper exploration...'
-                : 'Write what is on your mind today: thoughts, decisions, challenges, or goals you want to explore...'
-            }
-            disabled={isGenerating}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                handleSubmit(e);
-              }
-            }}
-            className="w-full bg-slate-900/90 border border-slate-700 focus:border-indigo-500 rounded-xl p-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none transition-colors resize-none"
+            id="reflection-content-textarea"
+            rows={10}
+            value={content}
+            onChange={e => setContent(e.target.value)}
+            placeholder="Begin writing your honest thoughts here..."
+            className={`w-full p-4 text-sm sm:text-base leading-relaxed rounded-xl border border-stone-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-stone-900 dark:text-slate-100 placeholder-stone-400 dark:placeholder-slate-500 focus:outline-hidden focus:ring-2 ${currentTheme.ringClass} shadow-2xs resize-y`}
           />
-
-          <div className="flex items-center justify-between pt-2">
-            <p className="text-[11px] text-slate-400">
-              Press <kbd className="px-1.5 py-0.5 bg-slate-800 border border-slate-700 rounded text-[10px] text-slate-300">Ctrl+Enter</kbd> to reflect
-            </p>
-
-            <button
-              id="btn-submit-reflection"
-              type="submit"
-              disabled={!prompt.trim() || isGenerating}
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold transition-all shadow-md shadow-indigo-600/30 cursor-pointer disabled:cursor-not-allowed"
-            >
-              {isGenerating ? (
-                <>
-                  <Sparkles className="w-4 h-4 animate-spin text-indigo-200" />
-                  <span>Gemini Reflecting...</span>
-                </>
-              ) : (
-                <>
-                  <span>{isFollowUp ? 'Send Reply' : 'Generate Reflection'}</span>
-                  <Send className="w-3.5 h-3.5" />
-                </>
-              )}
-            </button>
+          <div className="absolute right-3 bottom-3 text-xs text-stone-400 dark:text-slate-500 bg-white/80 dark:bg-slate-900/80 px-2 py-0.5 rounded">
+            {wordCount} words
           </div>
+        </div>
+
+        {/* Tag Input */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <Tag className="w-3.5 h-3.5 text-stone-400 dark:text-slate-500" />
+          {tags.map(tag => (
+            <span
+              key={tag}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-stone-100 dark:bg-slate-800 text-stone-700 dark:text-slate-300 text-xs font-medium"
+            >
+              #{tag}
+              <button
+                type="button"
+                onClick={() => handleRemoveTag(tag)}
+                className="hover:text-rose-600 text-stone-400 dark:text-slate-500"
+              >
+                &times;
+              </button>
+            </span>
+          ))}
+          <input
+            type="text"
+            placeholder="Add tag + Enter..."
+            value={tagInput}
+            onChange={e => setTagInput(e.target.value)}
+            onKeyDown={handleAddTag}
+            className="text-xs px-2 py-1 rounded-md border border-dashed border-stone-300 dark:border-slate-700 bg-transparent text-stone-900 dark:text-slate-100 placeholder-stone-400 dark:placeholder-slate-500 focus:bg-white dark:focus:bg-slate-800 focus:outline-hidden w-28"
+          />
+        </div>
+
+        {/* Submit Actions */}
+        <div className="pt-3 flex items-center justify-end gap-3">
+          <button
+            id="submit-and-analyze-reflection-btn"
+            type="submit"
+            disabled={loading || !content.trim()}
+            className={`inline-flex items-center gap-2 px-6 py-3 rounded-xl ${currentTheme.primaryBtn} text-sm font-semibold transition-all shadow-sm hover:shadow-md disabled:opacity-50`}
+          >
+            <Sparkles className="w-4 h-4 text-white/90" />
+            <span>{loading ? 'Synthesizing Patterns with Gemini...' : 'Analyze & Save Reflection'}</span>
+          </button>
         </div>
       </form>
     </div>
